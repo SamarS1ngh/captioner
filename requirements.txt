@@ -1,0 +1,6 @@
+faster-whisper
+ai4bharat-transliteration
+fastapi
+uvicorn
+python-multipart
+pytest
