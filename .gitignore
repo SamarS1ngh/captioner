@@ -9,3 +9,4 @@ models/
 *.mov
 output/
 .superpowers/
+!tests/fixtures/*.wav
