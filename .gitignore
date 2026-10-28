@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 models/
 *.mp4
+!tests/fixtures/*.mp4
 *.wav
 *.mov
 output/
