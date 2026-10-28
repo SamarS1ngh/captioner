@@ -1,0 +1,11 @@
+spikevenv/
+venv/
+.venv/
+__pycache__/
+*.pyc
+models/
+*.mp4
+*.wav
+*.mov
+output/
+.superpowers/
