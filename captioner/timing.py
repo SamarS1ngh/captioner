@@ -21,6 +21,9 @@ def distribute_timing(
     if not tokens:
         return []
 
+    if end < start:
+        end = start
+
     if len(tokens) == len(word_spans):
         return [Word(text, s, e) for text, (s, e) in zip(tokens, word_spans)]
 

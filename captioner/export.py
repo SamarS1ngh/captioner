@@ -59,6 +59,7 @@ def burn_captions(video_path: str, ass_path: str, out_path: str) -> None:
     cmd = [
         _ffmpeg(), "-y", "-i", video_path, "-vf", vf,
         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+        "-pix_fmt", "yuv420p",
         "-c:a", "copy", out_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)

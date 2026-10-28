@@ -63,3 +63,19 @@ def test_burn_produces_playable_output(kind, tmp_path, vertical_clip):
 def test_burn_raises_on_failure(tmp_path):
     with pytest.raises(RuntimeError):
         burn_captions(str(tmp_path / "missing.mp4"), str(tmp_path / "x.ass"), str(tmp_path / "o.mp4"))
+
+
+@pytest.mark.slow
+def test_burn_output_is_yuv420p(tmp_path, vertical_clip):
+    ass = tmp_path / "c.ass"
+    ass.write_text(build_ass(_transcript()), encoding="utf-8")
+    out = tmp_path / "out.mp4"
+
+    burn_captions(vertical_clip, str(ass), str(out))
+
+    pix_fmt = subprocess.run(
+        [_ffprobe(), "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=pix_fmt", "-of", "csv=p=0", str(out)],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert pix_fmt == "yuv420p"

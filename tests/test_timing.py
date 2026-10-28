@@ -40,3 +40,12 @@ def test_fewer_tokens_than_spans():
 def test_empty_tokens_returns_empty():
     assert distribute_timing(0.0, 1.0, [], []) == []
     assert distribute_timing(0.0, 1.0, [], [(0.0, 1.0)]) == []
+
+
+def test_inverted_range_is_clamped():
+    result = distribute_timing(5.0, 3.0, ["ab", "cdef", "g"], [])
+
+    assert len(result) == 3
+    for w in result:
+        assert w.end >= w.start
+        assert w.start == 5.0 and w.end == 5.0

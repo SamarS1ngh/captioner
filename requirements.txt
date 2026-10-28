@@ -1,7 +1,8 @@
-faster-whisper
-ai4bharat-transliteration
-fastapi
+faster-whisper==1.2.1
+ai4bharat-transliteration==1.1.3
+fastapi==0.128.8
 uvicorn
 python-multipart
 pytest
 httpx
+torch==2.8.0
