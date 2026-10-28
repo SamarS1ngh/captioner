@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Captioner</title>
+<style>
+body{font:16px system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#222}
+h1{margin-bottom:.2rem}
+#drop{border:2px dashed #999;border-radius:12px;padding:2.5rem;text-align:center;cursor:pointer}
+#drop.over{background:#fff8d6;border-color:#e0a800}
+.seg{display:flex;gap:.5rem;margin:.4rem 0;align-items:center}
+.seg small{color:#777;width:5.5rem;flex:none}
+.seg input{flex:1;padding:.4rem;font-size:1rem}
+button{padding:.6rem 1.2rem;font-size:1rem;border-radius:8px;border:0;background:#222;color:#fff;cursor:pointer}
+button:disabled{opacity:.5}
+#status{color:#555;margin:.8rem 0}
+video{max-width:100%;max-height:70vh;margin-top:1rem}
+.hidden{display:none}
+</style></head><body>
+<h1>Captioner</h1>
+<p>Drop a video. Review the Hinglish captions, then burn them in.</p>
+<div id="drop">Drag a video here or click to choose
+  <input id="file" type="file" accept="video/*" class="hidden"></div>
+<div id="status"></div>
+<div id="editor" class="hidden">
+  <div id="segs"></div>
+  <p><label><input id="srt" type="checkbox"> Also save .srt</label></p>
+  <button id="burn">Burn captions</button>
+</div>
+<div id="result" class="hidden">
+  <video id="player" controls></video>
+  <p><a id="dl" download>Download video</a> <span id="srtwrap" class="hidden"> | <a id="srtdl" download>Download .srt</a></span></p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let job=null, segments=[];
+const status=t=>$("status").textContent=t;
+$("drop").onclick=()=>$("file").click();
+$("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("over")};
+$("drop").ondragleave=()=>$("drop").classList.remove("over");
+$("drop").ondrop=e=>{e.preventDefault();$("drop").classList.remove("over");
+  if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0])};
+$("file").onchange=e=>{if(e.target.files[0])upload(e.target.files[0])};
+async function upload(file){
+  $("editor").classList.add("hidden");$("result").classList.add("hidden");
+  status("Transcribing... (first run downloads models, this can take a while)");
+  const fd=new FormData();fd.append("video",file);
+  try{
+    const r=await fetch("/process",{method:"POST",body:fd});
+    if(!r.ok)throw new Error((await r.json()).detail||r.statusText);
+    const d=await r.json();job=d.job;segments=d.transcript.segments;
+    const box=$("segs");box.innerHTML="";
+    segments.forEach((s,i)=>{
+      const row=document.createElement("div");row.className="seg";
+      const t=document.createElement("small");t.textContent=s.start.toFixed(1)+"-"+s.end.toFixed(1)+"s";
+      const inp=document.createElement("input");inp.value=s.text;
+      inp.oninput=()=>{segments[i].text=inp.value};
+      row.append(t,inp);box.append(row);
+    });
+    $("editor").classList.remove("hidden");status("Edit any line, then burn.");
+  }catch(err){status("Error: "+err.message)}
+}
+$("burn").onclick=async()=>{
+  $("burn").disabled=true;status("Burning captions...");
+  try{
+    const r=await fetch("/export",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({job,segments,want_srt:$("srt").checked})});
+    if(!r.ok)throw new Error((await r.json()).detail||r.statusText);
+    const d=await r.json(),bust="?t="+Date.now();
+    $("player").src=d.download+bust;$("dl").href=d.download;
+    $("srtwrap").classList.toggle("hidden",!d.srt);if(d.srt)$("srtdl").href=d.srt;
+    $("result").classList.remove("hidden");status("Done.");
+  }catch(err){status("Error: "+err.message)}
+  $("burn").disabled=false;
+};
+</script></body></html>
