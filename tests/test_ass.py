@@ -44,3 +44,45 @@ def test_escapes_brace_characters():
     # only our own \k overrides may remain as raw tags
     assert not re.search(r"(?<!\\)\{(?!\\k\d+\})", text)
     assert "\\{b\\}" in text
+
+
+# --- style presets -----------------------------------------------------------
+from captioner.ass import PRESETS, preset_names, get_style, AssStyle  # noqa: E402
+from captioner.models import Transcript, Segment, Word  # noqa: E402
+
+
+def _one_seg_transcript():
+    return Transcript(
+        segments=[Segment(text="main office", start=0.0, end=1.0,
+                          words=[Word("main", 0.0, 0.5), Word("office", 0.5, 1.0)])],
+        language="hi",
+    )
+
+
+def test_presets_registry_has_classic_first_and_all_assstyle():
+    names = preset_names()
+    assert names and names[0] == "classic"
+    assert all(isinstance(s, AssStyle) for s in PRESETS.values())
+    assert len(PRESETS) >= 5
+
+
+def test_get_style_unknown_falls_back_to_classic():
+    assert get_style("does-not-exist") is PRESETS["classic"]
+
+
+def test_build_ass_uses_preset_font_and_size():
+    out = build_ass(_one_seg_transcript(), get_style("bold_pop"))
+    assert "Arial Black" in out
+    # font size is the 3rd field of the Style line
+    style_line = next(l for l in out.splitlines() if l.startswith("Style:"))
+    assert style_line.split(",")[2] == "88"
+
+
+def test_boxed_preset_sets_border_style_3():
+    out = build_ass(_one_seg_transcript(), get_style("boxed"))
+    style_line = next(l for l in out.splitlines() if l.startswith("Style:"))
+    fields = style_line.split(",")
+    # fields: 0"Style: Default" 1font 2size 3pri 4sec 5outlineCol 6back 7bold
+    # 8italic 9underline 10strike 11scaleX 12scaleY 13spacing 14angle
+    # 15BorderStyle 16Outline 17Shadow 18alignment
+    assert fields[15] == "3" and fields[16] == "4"  # boxed: border 3, outline 4

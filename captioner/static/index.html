@@ -23,6 +23,7 @@ video{max-width:100%;max-height:70vh;margin-top:1rem}
 <div id="status"></div>
 <div id="editor" class="hidden">
   <div id="segs"></div>
+  <p><label>Caption style: <select id="style"></select></label></p>
   <p><label><input id="srt" type="checkbox"> Also save .srt</label></p>
   <button id="burn">Burn captions</button>
 </div>
@@ -34,6 +35,10 @@ video{max-width:100%;max-height:70vh;margin-top:1rem}
 const $=id=>document.getElementById(id);
 let job=null, segments=[];
 const status=t=>$("status").textContent=t;
+const prettyStyle=n=>n.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+fetch("/styles").then(r=>r.json()).then(d=>{
+  $("style").innerHTML=d.presets.map(p=>`<option value="${p}">${prettyStyle(p)}</option>`).join("");
+}).catch(()=>{});
 $("drop").onclick=()=>$("file").click();
 $("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("over")};
 $("drop").ondragleave=()=>$("drop").classList.remove("over");
@@ -63,7 +68,7 @@ $("burn").onclick=async()=>{
   $("burn").disabled=true;status("Burning captions...");
   try{
     const r=await fetch("/export",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({job,segments,want_srt:$("srt").checked})});
+      body:JSON.stringify({job,segments,preset:$("style").value,want_srt:$("srt").checked})});
     if(!r.ok)throw new Error((await r.json()).detail||r.statusText);
     const d=await r.json(),bust="?t="+Date.now();
     $("player").src=d.download+bust;$("dl").href=d.download;

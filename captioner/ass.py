@@ -19,7 +19,11 @@ class AssStyle:
     primary_color: str = "&H00FFFFFF"    # resting text: white (&HAABBGGRR)
     highlight_color: str = "&H0000E5FF"  # sung word: amber/yellow (BGR)
     outline_color: str = "&H00000000"
+    back_color: str = "&H00000000"       # box/shadow colour (&HAABBGGRR)
     outline: int = 5
+    shadow: int = 0
+    bold: bool = True
+    border_style: int = 1  # 1 = outline+shadow, 3 = opaque box behind text
     margin_v: int = 260
     alignment: int = 2  # bottom-center
     play_res_x: int = 1080
@@ -88,7 +92,8 @@ def build_ass(t: Transcript, style: AssStyle = AssStyle()) -> str:
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{style.font_name},{style.font_size},"
         f"{style.highlight_color},{style.primary_color},{style.outline_color},"
-        f"&H00000000,-1,0,0,0,100,100,0,0,1,{style.outline},0,"
+        f"{style.back_color},{-1 if style.bold else 0},0,0,0,100,100,0,0,"
+        f"{style.border_style},{style.outline},{style.shadow},"
         f"{style.alignment},60,60,{style.margin_v},1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
@@ -100,3 +105,54 @@ def build_ass(t: Transcript, style: AssStyle = AssStyle()) -> str:
         for seg in t.segments
     ]
     return header + "\n".join(lines) + "\n"
+
+
+# --- Named style presets -----------------------------------------------------
+# Colours are &HAABBGGRR (AA=00 is opaque). primary_color = resting word,
+# highlight_color = the word currently being spoken (karaoke flip).
+PRESETS: dict[str, AssStyle] = {
+    # Clean white text, amber highlight — the original default.
+    "classic": AssStyle(),
+    # Big bold MrBeast-style pop: heavy font, pure-yellow highlight, fat outline.
+    "bold_pop": AssStyle(
+        font_name="Arial Black", font_size=88,
+        primary_color="&H00FFFFFF", highlight_color="&H0000FFFF",
+        outline=8, shadow=2,
+    ),
+    # Hot-pink highlight on bold white.
+    "pink_pop": AssStyle(
+        font_name="Arial Black", font_size=84,
+        primary_color="&H00FFFFFF", highlight_color="&H00AA00FF",
+        outline=7, shadow=2,
+    ),
+    # Neon: cyan highlight, strong black outline for glow-on-dark legibility.
+    "neon": AssStyle(
+        font_name="Arial", font_size=78,
+        primary_color="&H00FFFFFF", highlight_color="&H00FFFF00",
+        outline=5, shadow=3,
+    ),
+    # Minimal: soft grey resting text, clean white highlight, thin outline.
+    "minimal": AssStyle(
+        font_name="Helvetica", font_size=60, bold=False,
+        primary_color="&H00C8C8C8", highlight_color="&H00FFFFFF",
+        outline=3,
+    ),
+    # Boxed: opaque black box behind the text (BorderStyle 3), yellow highlight.
+    "boxed": AssStyle(
+        font_name="Arial", font_size=68,
+        primary_color="&H00FFFFFF", highlight_color="&H0000FFFF",
+        border_style=3, back_color="&H80000000", outline=4, shadow=0,
+    ),
+}
+
+DEFAULT_PRESET = "classic"
+
+
+def preset_names() -> list[str]:
+    """Preset names in display order (default first)."""
+    return list(PRESETS.keys())
+
+
+def get_style(name: str) -> AssStyle:
+    """Return the preset's AssStyle; unknown names fall back to the default."""
+    return PRESETS.get(name, PRESETS[DEFAULT_PRESET])

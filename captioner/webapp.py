@@ -13,7 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from captioner.ass import AssStyle, build_ass
+from captioner.ass import AssStyle, build_ass, get_style, preset_names
 from captioner.export import burn_captions
 from captioner.models import Transcript
 from captioner.pipeline import process_video
@@ -31,7 +31,8 @@ JOBS: dict[str, dict[str, Any]] = {}
 class ExportRequest(BaseModel):
     job: str
     segments: list[dict]
-    style: dict = {}
+    preset: str = "classic"
+    style: dict = {}  # optional per-field overrides on top of the preset
     want_srt: bool = False
     language: Optional[str] = "hi"
 
@@ -39,6 +40,11 @@ class ExportRequest(BaseModel):
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/styles")
+def styles() -> dict:
+    return {"presets": preset_names()}
 
 
 @app.post("/process")
@@ -65,7 +71,8 @@ async def export(req: ExportRequest) -> dict:
     if info is None:
         raise HTTPException(404, "Unknown job")
     allowed = {f.name for f in dataclasses.fields(AssStyle)}
-    style = AssStyle(**{k: v for k, v in req.style.items() if k in allowed})
+    overrides = {k: v for k, v in req.style.items() if k in allowed}
+    style = dataclasses.replace(get_style(req.preset), **overrides)
     transcript = Transcript.from_dict(
         {"segments": req.segments, "language": req.language or "hi"}
     )
