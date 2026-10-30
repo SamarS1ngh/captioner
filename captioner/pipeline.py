@@ -1,19 +1,33 @@
-"""Video -> romanized transcript pipeline."""
+"""Video -> romanized Hinglish transcript, via Groq (whisper-large-v3 + LLM cleanup).
+
+Requires a Groq API key (passed in, or $GROQ_API_KEY). Cloud-only: audio is sent
+to Groq. This gives far better romanized Hinglish than any local option tried.
+"""
+from __future__ import annotations
+
 import os
 import tempfile
 
+from captioner import groq_engine
 from captioner.export import extract_audio
 from captioner.models import Transcript
-from captioner.romanize import romanize_transcript
-from captioner.transcribe import transcribe
 
 
-def process_video(video_path: str, model_name: str = "large-v3-turbo") -> Transcript:
+class MissingKeyError(ValueError):
+    """Raised when no Groq API key is available."""
+
+
+def process_video(video_path: str, api_key: str | None = None) -> Transcript:
+    key = (api_key or groq_engine.key_from_env() or "").strip()
+    if not key:
+        raise MissingKeyError(
+            "A Groq API key is required. Get a free one at console.groq.com "
+            "and paste it in the app."
+        )
     fd, wav_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     try:
         extract_audio(video_path, wav_path)
-        transcript = transcribe(wav_path, model_name)
+        return groq_engine.transcribe_and_romanize(wav_path, key)
     finally:
         os.remove(wav_path)
-    return romanize_transcript(transcript)

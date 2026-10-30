@@ -13,59 +13,226 @@ h1{margin-bottom:.2rem}
 button{padding:.6rem 1.2rem;font-size:1rem;border-radius:8px;border:0;background:#222;color:#fff;cursor:pointer}
 button:disabled{opacity:.5}
 #status{color:#555;margin:.8rem 0}
-video{max-width:100%;max-height:70vh;margin-top:1rem}
-.hidden{display:none}
+video{max-width:100%;max-height:70vh;display:block}
+.hidden{display:none!important}  /* beats #loader{display:flex} specificity */
+select{padding:.4rem;font-size:1rem}
+/* loader */
+#loader{display:flex;gap:.6rem;align-items:center;margin:1rem 0}
+.spin{width:22px;height:22px;border:3px solid #ddd;border-top-color:#e0a800;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* live preview */
+#pvwrap{position:relative;display:inline-block;max-width:100%;margin:.5rem 0;background:#000;border-radius:8px;overflow:hidden}
+#overlay{position:absolute;left:0;right:0;bottom:0;text-align:center;pointer-events:none;
+  padding:0 4%;box-sizing:border-box;line-height:1.15}
+#overlay .cap{display:inline-block;max-width:100%}
+#overlay span{white-space:pre-wrap}
+/* api key box */
+#keybox{margin:.5rem 0 1rem;border:1px solid #eee;border-radius:8px;padding:.6rem .8rem}
+#keybox summary{cursor:pointer;color:#444;font-weight:600}
+#keybox .hint{color:#777;font-size:.9rem;margin:.5rem 0}
+#apikey{width:100%;padding:.5rem;font-size:1rem;box-sizing:border-box;font-family:monospace}
+#keybox.set summary::after{content:" ✓ key saved";color:#1a8f3c;font-weight:400}
 </style></head><body>
 <h1>Captioner</h1>
-<p>Drop a video. Review the Hinglish captions, then burn them in.</p>
+<p>Drop a video. Review the Hinglish captions, preview the look, then burn them in.</p>
+
+<details id="keybox">
+  <summary>⚙︎ Groq API key (required)</summary>
+  <p class="hint">Captions are made with Groq (whisper-large-v3 + LLM Hinglish cleanup) — runs in the cloud, so audio leaves your Mac. Get a <b>free</b> key (no card) at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> → API Keys. Stored only in this browser, sent only to Groq.</p>
+  <input id="apikey" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+</details>
+
 <div id="drop">Drag a video here or click to choose
   <input id="file" type="file" accept="video/*" class="hidden"></div>
+
+<div id="loader" class="hidden"><div class="spin"></div><span id="loadtxt">Working…</span></div>
 <div id="status"></div>
+
 <div id="editor" class="hidden">
-  <div id="segs"></div>
   <p><label>Caption style: <select id="style"></select></label></p>
+  <div id="pvwrap">
+    <video id="preview" controls playsinline></video>
+    <div id="overlay"></div>
+  </div>
+  <p style="color:#777;margin:.2rem 0 1rem">↑ Live preview (approximate). The burned video is full quality.</p>
+  <div id="segs"></div>
   <p><label><input id="srt" type="checkbox"> Also save .srt</label></p>
   <button id="burn">Burn captions</button>
 </div>
+
 <div id="result" class="hidden">
+  <h3>Burned result</h3>
   <video id="player" controls></video>
   <p><a id="dl" download>Download video</a> <span id="srtwrap" class="hidden"> | <a id="srtdl" download>Download .srt</a></span></p>
 </div>
+
 <script>
 const $=id=>document.getElementById(id);
-let job=null, segments=[];
+let job=null, segments=[], videoURL=null;
+let STYLES={}, scale=1;
 const status=t=>$("status").textContent=t;
 const prettyStyle=n=>n.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+
+// --- Groq API key (saved in this browser only) ---
+function markKey(k){$("keybox").classList.toggle("set",!!(k&&k.trim()));}
+(function initKey(){
+  let k="";try{k=localStorage.getItem("groqKey")||"";}catch(e){}
+  $("apikey").value=k;markKey(k);
+  if(!k.trim())$("keybox").open=true;       // nudge first-time users to add it
+})();
+$("apikey").oninput=()=>{const k=$("apikey").value.trim();
+  try{localStorage.setItem("groqKey",k);}catch(e){}markKey(k);};
+
+let loadTimer=null, loadStart=0, loadBase="";
+function renderLoad(){
+  const s=Math.round((Date.now()-loadStart)/1000);
+  $("loadtxt").textContent=loadBase+"  ("+s+"s)";
+}
+function showLoader(t){
+  loadBase=t;loadStart=Date.now();renderLoad();
+  $("loader").classList.remove("hidden");
+  clearInterval(loadTimer);loadTimer=setInterval(renderLoad,1000);
+}
+function setLoad(t){loadBase=t;renderLoad();}          // change phase text, keep timer
+function hideLoader(){clearInterval(loadTimer);loadTimer=null;$("loader").classList.add("hidden");}
+
+// ASS &HAABBGGRR -> CSS rgba()
+function assColor(s){
+  const h=(s||"").replace(/^&H/i,"").padStart(8,"0");
+  const a=parseInt(h.slice(0,2),16), b=parseInt(h.slice(2,4),16),
+        g=parseInt(h.slice(4,6),16), r=parseInt(h.slice(6,8),16);
+  return `rgba(${r},${g},${b},${(255-a)/255})`;
+}
+function fontStack(name){
+  if(/black/i.test(name))return `"Arial Black","Arial Bold",Arial,sans-serif`;
+  if(/helvetica/i.test(name))return `Helvetica,Arial,sans-serif`;
+  return `${name},Arial,sans-serif`;
+}
+
+// load presets (full fields) and build the dropdown
 fetch("/styles").then(r=>r.json()).then(d=>{
-  $("style").innerHTML=d.presets.map(p=>`<option value="${p}">${prettyStyle(p)}</option>`).join("");
+  d.presets.forEach(p=>STYLES[p.name]=p);
+  $("style").innerHTML=d.presets.map(p=>`<option value="${p.name}">${prettyStyle(p.name)}</option>`).join("");
 }).catch(()=>{});
+$("style").onchange=()=>{applyOverlayStyle();renderCaption();};
+
 $("drop").onclick=()=>$("file").click();
 $("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("over")};
 $("drop").ondragleave=()=>$("drop").classList.remove("over");
 $("drop").ondrop=e=>{e.preventDefault();$("drop").classList.remove("over");
   if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0])};
 $("file").onchange=e=>{if(e.target.files[0])upload(e.target.files[0])};
-async function upload(file){
-  $("editor").classList.add("hidden");$("result").classList.add("hidden");
-  status("Transcribing... (first run downloads models, this can take a while)");
-  const fd=new FormData();fd.append("video",file);
-  try{
-    const r=await fetch("/process",{method:"POST",body:fd});
-    if(!r.ok)throw new Error((await r.json()).detail||r.statusText);
-    const d=await r.json();job=d.job;segments=d.transcript.segments;
-    const box=$("segs");box.innerHTML="";
-    segments.forEach((s,i)=>{
-      const row=document.createElement("div");row.className="seg";
-      const t=document.createElement("small");t.textContent=s.start.toFixed(1)+"-"+s.end.toFixed(1)+"s";
-      const inp=document.createElement("input");inp.value=s.text;
-      inp.oninput=()=>{segments[i].text=inp.value};
-      row.append(t,inp);box.append(row);
-    });
-    $("editor").classList.remove("hidden");status("Edit any line, then burn.");
-  }catch(err){status("Error: "+err.message)}
+
+function upload(file){
+  const key=($("apikey").value||"").trim();
+  if(!key){$("keybox").open=true;status("Paste your free Groq API key above first — get one at console.groq.com.");return;}
+  $("editor").classList.add("hidden");$("result").classList.add("hidden");status("");
+  // keep the raw video client-side for the live preview
+  if(videoURL)URL.revokeObjectURL(videoURL);
+  videoURL=URL.createObjectURL(file);
+  $("preview").src=videoURL;
+  const mb=(file.size/1048576).toFixed(0);
+  const TRANSCRIBING="Transcribing + cleaning Hinglish (Groq)… longer clips take a bit";
+  showLoader("Uploading video… 0% of "+mb+" MB");
+  // XHR, not fetch: fetch can't report upload progress for a big file
+  const fd=new FormData();fd.append("video",file);fd.append("api_key",key);
+  const xhr=new XMLHttpRequest();
+  xhr.open("POST","/process");
+  xhr.upload.onprogress=e=>{
+    if(!e.lengthComputable)return;
+    const pct=Math.round(e.loaded/e.total*100);
+    setLoad(pct<100 ? "Uploading video… "+pct+"% of "+mb+" MB" : TRANSCRIBING);
+  };
+  xhr.upload.onload=()=>setLoad(TRANSCRIBING);  // bytes all sent -> server now transcribing
+  xhr.onload=()=>{
+    hideLoader();
+    if(xhr.status>=200 && xhr.status<300){
+      try{
+        const d=JSON.parse(xhr.responseText);
+        job=d.job;segments=d.transcript.segments||[];
+        buildSegEditor();$("editor").classList.remove("hidden");
+        status("Edit any line, pick a style, then burn.");
+        applyOverlayStyle();renderCaption();
+      }catch(err){status("Error parsing result: "+err.message);}
+    }else{
+      let msg=xhr.statusText||("HTTP "+xhr.status);
+      try{msg=JSON.parse(xhr.responseText).detail||msg;}catch(e){}
+      status("Error: "+msg);
+    }
+  };
+  xhr.onerror=()=>{hideLoader();status("Error: upload failed — is the server running?");};
+  xhr.onabort=()=>{hideLoader();status("Upload cancelled.");};
+  xhr.send(fd);
 }
+
+function buildSegEditor(){
+  const box=$("segs");box.innerHTML="";
+  segments.forEach((s,i)=>{
+    const row=document.createElement("div");row.className="seg";
+    const t=document.createElement("small");t.textContent=s.start.toFixed(1)+"-"+s.end.toFixed(1)+"s";
+    const inp=document.createElement("input");inp.value=s.text;
+    inp.oninput=()=>{segments[i].text=inp.value;renderCaption();};
+    row.append(t,inp);box.append(row);
+  });
+}
+
+// --- live preview ---------------------------------------------------------
+const pv=$("preview");
+function computeScale(){
+  // ASS font_size is in a 1080-wide canvas; scale to the displayed width
+  scale=(pv.clientWidth||1080)/1080;
+}
+pv.addEventListener("loadedmetadata",()=>{computeScale();applyOverlayStyle();});
+window.addEventListener("resize",()=>{computeScale();applyOverlayStyle();renderCaption();});
+pv.addEventListener("timeupdate",renderCaption);
+
+function applyOverlayStyle(){
+  const st=STYLES[$("style").value];if(!st)return;
+  computeScale();
+  const o=$("overlay");
+  o.style.fontFamily=fontStack(st.font_name);
+  o.style.fontWeight=st.bold?"900":"400";
+  o.style.fontSize=(st.font_size*scale)+"px";
+  o.style.paddingBottom=(st.margin_v*scale)+"px";
+  const stroke=Math.max(1,st.outline*scale);
+  // outline via text-stroke (behind the fill) + soft shadow for depth
+  o.style.webkitTextStrokeWidth=stroke+"px";
+  o.style.webkitTextStrokeColor=assColor(st.outline_color);
+  o.style.paintOrder="stroke fill";
+  o.style.textShadow=`0 ${Math.max(1,st.shadow*scale)}px ${2*scale}px rgba(0,0,0,.5)`;
+}
+
+function renderCaption(){
+  const o=$("overlay");o.innerHTML="";
+  const st=STYLES[$("style").value];if(!st)return;
+  const t=pv.currentTime;
+  const seg=segments.find(s=>t>=s.start && t<s.end);
+  if(!seg)return;
+  const toks=(seg.text||"").trim().split(/\s+/).filter(Boolean);
+  if(!toks.length)return;
+  // per-token start time: use word timestamps when counts match, else even split
+  let times;
+  if(seg.words && seg.words.length===toks.length){times=seg.words.map(w=>w.start);}
+  else{const d=(seg.end-seg.start)/toks.length;times=toks.map((_,i)=>seg.start+i*d);}
+  const rest=assColor(st.primary_color), hi=assColor(st.highlight_color);
+  const cap=document.createElement("div");cap.className="cap";
+  if(st.border_style===3){
+    cap.style.background=assColor(st.back_color);
+    cap.style.padding=(st.font_size*0.12*scale)+"px "+(st.font_size*0.3*scale)+"px";
+    cap.style.borderRadius=(6*scale)+"px";
+  }
+  toks.forEach((tok,i)=>{
+    const sp=document.createElement("span");
+    sp.textContent=tok+(i<toks.length-1?" ":"");
+    sp.style.color=(t>=times[i])?hi:rest;  // karaoke: fills as it's spoken
+    cap.append(sp);
+  });
+  o.append(cap);
+}
+
+// --- burn -----------------------------------------------------------------
 $("burn").onclick=async()=>{
-  $("burn").disabled=true;status("Burning captions...");
+  $("burn").disabled=true;showLoader("Burning captions…");status("");
   try{
     const r=await fetch("/export",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({job,segments,preset:$("style").value,want_srt:$("srt").checked})});
@@ -74,7 +241,13 @@ $("burn").onclick=async()=>{
     $("player").src=d.download+bust;$("dl").href=d.download;
     $("srtwrap").classList.toggle("hidden",!d.srt);if(d.srt)$("srtdl").href=d.srt;
     $("result").classList.remove("hidden");status("Done.");
-  }catch(err){status("Error: "+err.message)}
-  $("burn").disabled=false;
+    $("result").scrollIntoView({behavior:"smooth"});
+  }catch(err){status("Error: "+err.message);}
+  finally{hideLoader();$("burn").disabled=false;}
 };
+
+// warn (don't block) if the browser can't decode the raw file for the preview
+pv.addEventListener("error",()=>{
+  status("Preview can't play this video's codec in the browser, but the caption overlay and burn still work.");
+});
 </script></body></html>

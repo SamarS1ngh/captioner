@@ -1,20 +1,39 @@
-import re
-
 import pytest
 
-from captioner.models import Transcript
-from captioner.pipeline import process_video
-
-VIDEO = "tests/fixtures/sample_hinglish.mp4"
+from captioner import pipeline
+from captioner.models import Segment, Transcript, Word
 
 
-@pytest.mark.slow
-def test_process_video_end_to_end():
-    t = process_video(VIDEO)
-    assert isinstance(t, Transcript)
-    first = t.segments[0]
-    assert not re.search("[ऀ-ॿ]", first.text)
-    assert "happy" in first.text.lower()
-    assert first.words
-    for w in first.words:
-        assert w.end >= w.start
+def test_missing_key_raises(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(pipeline.MissingKeyError):
+        pipeline.process_video("tests/fixtures/sample_hinglish.mp4", api_key="")
+
+
+def test_routes_to_groq_with_key(monkeypatch, tmp_path):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    calls = {}
+    monkeypatch.setattr(pipeline, "extract_audio",
+                        lambda v, w: open(w, "wb").close())
+    fake = Transcript([Segment("main office ja raha hu", 0.0, 1.0,
+                               [Word("x", 0.0, 1.0)])], "hi")
+
+    def fake_groq(wav, key):
+        calls["key"] = key
+        return fake
+
+    monkeypatch.setattr(pipeline.groq_engine, "transcribe_and_romanize", fake_groq)
+    out = pipeline.process_video("tests/fixtures/sample_hinglish.mp4", api_key="gsk_test")
+    assert out is fake
+    assert calls["key"] == "gsk_test"
+
+
+def test_env_key_used_when_arg_empty(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_env")
+    monkeypatch.setattr(pipeline, "extract_audio", lambda v, w: open(w, "wb").close())
+    seen = {}
+    monkeypatch.setattr(pipeline.groq_engine, "transcribe_and_romanize",
+                        lambda wav, key: seen.setdefault("key", key) or
+                        Transcript([], "hi"))
+    pipeline.process_video("tests/fixtures/sample_hinglish.mp4")
+    assert seen["key"] == "gsk_env"

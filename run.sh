@@ -5,8 +5,7 @@ cd "$(dirname "$0")"
 if [ ! -x .venv/bin/python ]; then
   /usr/bin/python3 -m venv .venv
 fi
-.venv/bin/python -m pip install -q 'pip<24.1'
-.venv/bin/python -m pip install -q -r requirements.txt fastapi uvicorn python-multipart httpx
+.venv/bin/python -m pip install -q -r requirements.txt
 
 BASE="https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release"
 mkdir -p vendor/ffmpeg

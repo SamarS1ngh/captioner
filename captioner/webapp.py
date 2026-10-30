@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -39,16 +40,24 @@ class ExportRequest(BaseModel):
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
+    # no-store: the UI is iterated often; never let the browser serve a stale page
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/styles")
 def styles() -> dict:
-    return {"presets": preset_names()}
+    # full field set per preset so the browser preview can render it faithfully
+    return {"presets": [
+        {"name": name, **dataclasses.asdict(get_style(name))}
+        for name in preset_names()
+    ]}
 
 
 @app.post("/process")
-async def process(video: UploadFile = File(...)) -> dict:
+async def process(
+    video: UploadFile = File(...),
+    api_key: str = Form(""),
+) -> dict:
     job = uuid.uuid4().hex
     work = WORK_ROOT / job
     work.mkdir(parents=True, exist_ok=True)
@@ -57,12 +66,13 @@ async def process(video: UploadFile = File(...)) -> dict:
     with path.open("wb") as f:
         shutil.copyfileobj(video.file, f)
     try:
-        transcript = await run_in_threadpool(process_video, str(path))
+        transcript = await run_in_threadpool(process_video, str(path), api_key)
     except Exception as exc:
         shutil.rmtree(work, ignore_errors=True)
         raise HTTPException(500, f"Processing failed: {exc}")
+    engine = "groq" if (api_key.strip() or os.environ.get("GROQ_API_KEY")) else "local"
     JOBS[job] = {"dir": work, "video": path}
-    return {"job": job, "transcript": transcript.to_dict()}
+    return {"job": job, "transcript": transcript.to_dict(), "engine": engine}
 
 
 @app.post("/export")

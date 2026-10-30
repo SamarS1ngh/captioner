@@ -53,11 +53,17 @@ def test_export_unknown_job():
     assert r.status_code == 404
 
 
-def test_styles_endpoint_lists_presets():
+def test_styles_endpoint_lists_presets_with_fields():
     r = client.get("/styles")
     assert r.status_code == 200
     presets = r.json()["presets"]
-    assert "classic" in presets and "bold_pop" in presets
+    names = [p["name"] for p in presets]
+    assert "classic" in names and "bold_pop" in names
+    classic = next(p for p in presets if p["name"] == "classic")
+    # fields the preview needs to render faithfully
+    for key in ("font_name", "font_size", "primary_color",
+                "highlight_color", "outline", "border_style", "margin_v"):
+        assert key in classic
 
 
 def test_export_applies_chosen_preset(tmp_path, monkeypatch):
