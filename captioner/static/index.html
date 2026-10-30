@@ -32,12 +32,20 @@ select{padding:.4rem;font-size:1rem}
 #overlay{pointer-events:none;line-height:1.15;text-align:center;padding:.1em .15em}
 #overlay .cap{display:inline-block;max-width:100%}
 #overlay span{white-space:pre-wrap}
-/* corner grip: drag to reshape the caption box width */
-.rz{position:absolute;right:1px;bottom:1px;width:14px;height:14px;border-radius:50%;
-  background:rgba(255,255,255,.95);box-shadow:0 0 0 1px rgba(0,0,0,.45);
-  opacity:0;transition:opacity .12s;cursor:ew-resize;z-index:6;touch-action:none}
+/* 8 resize handles: corners resize both, sides width, top/bottom text size */
+.rz{position:absolute;width:12px;height:12px;border-radius:3px;
+  background:rgba(255,255,255,.96);box-shadow:0 0 0 1px rgba(0,0,0,.45);
+  opacity:0;transition:opacity .12s;z-index:6;touch-action:none}
 #capbox:hover .rz,#capbox.rzon .rz{opacity:1}
 @media(hover:none){.rz{opacity:.9}}  /* always visible on touch (no hover) */
+.rz.tl{left:-6px;top:-6px;cursor:nwse-resize}
+.rz.tr{right:-6px;top:-6px;cursor:nesw-resize}
+.rz.bl{left:-6px;bottom:-6px;cursor:nesw-resize}
+.rz.br{right:-6px;bottom:-6px;cursor:nwse-resize}
+.rz.ml{left:-6px;top:50%;margin-top:-6px;cursor:ew-resize}
+.rz.mr{right:-6px;top:50%;margin-top:-6px;cursor:ew-resize}
+.rz.tc{top:-6px;left:50%;margin-left:-6px;cursor:ns-resize}
+.rz.bc{bottom:-6px;left:50%;margin-left:-6px;cursor:ns-resize}
 @media(prefers-reduced-motion:reduce){#overlay .pop{animation:none}}
 @keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
 #overlay .pop{animation:pop .22s ease-out}
@@ -83,12 +91,19 @@ button.small{padding:.3rem .7rem;font-size:.85rem}
     <label>Highlight <input id="ghl" type="color" value="#ffe500"></label>
     <button id="posreset" class="small" type="button" title="recenter caption box and restore its size">⤢ reset box</button>
   </p>
-  <p class="hint" style="margin:.2rem 0 .4rem">Drag the caption to move it; drag the corner dot to reshape the box. Scroll over it, pinch (trackpad/phone), or use the slider to resize the text.</p>
+  <p class="hint" style="margin:.2rem 0 .4rem">Drag the caption to move it. Drag any handle to resize the box — corners resize freely, side handles change width, top/bottom change text size. Scroll or pinch also resize the text.</p>
   <div id="pvwrap">
     <video id="preview" controls playsinline></video>
     <div id="capbox" class="hidden">
       <div id="overlay"></div>
-      <span class="rz" title="drag to resize text"></span>
+      <span class="rz tl" data-w="1" data-h="1"></span>
+      <span class="rz tc" data-h="1"></span>
+      <span class="rz tr" data-w="1" data-h="1"></span>
+      <span class="rz ml" data-w="1"></span>
+      <span class="rz mr" data-w="1"></span>
+      <span class="rz bl" data-w="1" data-h="1"></span>
+      <span class="rz bc" data-h="1"></span>
+      <span class="rz br" data-w="1" data-h="1"></span>
     </div>
   </div>
   <p style="color:#777;margin:.2rem 0 1rem">↑ Live preview (approximate). The burned video is full quality.</p>
@@ -202,33 +217,42 @@ const curSize=()=>effSize(STYLES[$("style").value]||{});
 function startMove(){const r=pv.getBoundingClientRect();
   drag={mode:"move",pw:r.width||1,ph:r.height||1,top:r.top,left:r.left};
   $("capbox").classList.add("rzon");}
-function startBox(e){const r=pv.getBoundingClientRect(), cxN=(gpos.x!=null?gpos.x:0.5);
-  drag={mode:"box",cx:r.left+cxN*r.width,pw:r.width||1};$("capbox").classList.add("rzon");}
+function startBox(e,h){const r=pv.getBoundingClientRect(), b=$("capbox").getBoundingClientRect();
+  drag={mode:"box",h,cx:b.left+b.width/2,cy:b.top+b.height/2,
+        pw:r.width||1,halfH:(b.height/2)||1,startSize:curSize()};
+  $("capbox").classList.add("rzon");}
 function moveBox(e){
   gpos.x=clamp((ptX(e)-drag.left)/drag.pw,0,1);
   gpos.y=clamp((ptY(e)-drag.top)/drag.ph,0,1);positionBox();}
-function resizeBox(e){boxW=clamp(2*Math.abs(ptX(e)-drag.cx)/drag.pw,.25,1);positionBox();}
+function resizeBox(e){
+  if(drag.h.w) boxW=clamp(2*Math.abs(ptX(e)-drag.cx)/drag.pw,.2,1);         // width
+  if(drag.h.h){const ratio=Math.abs(ptY(e)-drag.cy)/drag.halfH;             // text size
+    sizeOverride=clamp(Math.round(drag.startSize*ratio),24,300);syncSizeUI();}
+  applyOverlayStyle();renderCaption();}
 function setSize(px){sizeOverride=clamp(Math.round(px),24,300);
   syncSizeUI();applyOverlayStyle();renderCaption();}
 function endGesture(){drag=null;pinch=null;$("capbox").classList.remove("rzon");}
 (function wireBox(){
-  const cb=$("capbox"), grip=cb.querySelector(".rz");
-  // corner grip reshapes the box width; body drags to move
-  grip.addEventListener("mousedown",e=>{startBox(e);e.stopPropagation();e.preventDefault();});
-  grip.addEventListener("touchstart",e=>{startBox(e);e.stopPropagation();e.preventDefault();},{passive:false});
-  cb.addEventListener("mousedown",e=>{if(e.button===0&&e.target!==grip){startMove();e.preventDefault();}});
+  const cb=$("capbox"), grips=[...cb.querySelectorAll(".rz")];
+  grips.forEach(g=>{
+    const h={w:g.dataset.w==="1",h:g.dataset.h==="1"};
+    g.addEventListener("mousedown",e=>{startBox(e,h);e.stopPropagation();e.preventDefault();});
+    g.addEventListener("touchstart",e=>{startBox(e,h);e.stopPropagation();e.preventDefault();},{passive:false});
+  });
+  // body drags to move
+  cb.addEventListener("mousedown",e=>{if(e.button===0&&!e.target.classList.contains("rz")){startMove();e.preventDefault();}});
   document.addEventListener("mousemove",e=>{if(!drag)return;
     drag.mode==="box"?resizeBox(e):moveBox(e);});
   document.addEventListener("mouseup",endGesture);
   // mouse wheel / trackpad pinch over the box resizes the TEXT
   cb.addEventListener("wheel",e=>{e.preventDefault();pinch=null;
     setSize(curSize()-e.deltaY*(e.ctrlKey?0.6:0.3));},{passive:false});
-  // touch: one finger moves (or grip resizes box), two fingers pinch text + rotate
+  // touch: one finger moves (or a handle resizes), two fingers pinch text + rotate
   cb.addEventListener("touchstart",e=>{
     if(e.touches.length>=2){
       pinch={d:tDist(e.touches)||1,a:tAng(e.touches),size:curSize(),rot:rot};
       drag=null;$("capbox").classList.add("rzon");
-    }else if(!drag){startMove();}   // grip's own touchstart already set drag
+    }else if(!drag){startMove();}   // a handle's own touchstart already set drag
     e.preventDefault();
   },{passive:false});
   cb.addEventListener("touchmove",e=>{
