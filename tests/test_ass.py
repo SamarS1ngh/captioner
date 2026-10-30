@@ -151,3 +151,10 @@ def test_custom_drag_position_pins_events():
     assert "\\pos(540,480)" in out  # 1080*0.5, 1920*0.25
     assert out.count("\\pos(") == len([l for l in out.splitlines()
                                        if l.startswith("Dialogue:")])
+
+
+def test_box_width_sets_left_right_margins():
+    from dataclasses import replace
+    out = build_ass(_one_seg_transcript(), replace(get_style("karaoke"), margin_l=200, margin_r=200))
+    f = next(l for l in out.splitlines() if l.startswith("Style:")).split(",")
+    assert f[19] == "200" and f[20] == "200"  # MarginL, MarginR

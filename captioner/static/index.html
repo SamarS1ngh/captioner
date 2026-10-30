@@ -22,10 +22,18 @@ select{padding:.4rem;font-size:1rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* live preview */
 #pvwrap{position:relative;display:inline-block;max-width:100%;margin:.5rem 0;background:#000;border-radius:8px;overflow:hidden}
-#overlay{position:absolute;inset:0;display:flex;justify-content:center;
-  pointer-events:none;padding:0 4%;box-sizing:border-box;line-height:1.15;text-align:center}
+/* the caption box: drag to move, side handles resize width, corner resizes text */
+#capbox{position:absolute;box-sizing:border-box;z-index:5;touch-action:none;
+  border:1.5px dashed rgba(255,255,255,.4);border-radius:6px;cursor:move}
+#capbox.hidden{display:none!important}
+#overlay{pointer-events:none;line-height:1.15;text-align:center;padding:.1em .15em}
 #overlay .cap{display:inline-block;max-width:100%}
 #overlay span{white-space:pre-wrap}
+.rz{position:absolute;background:#2563EB;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);z-index:6}
+.rz.l,.rz.r{top:50%;width:9px;height:34px;margin-top:-17px;border-radius:4px;cursor:ew-resize}
+.rz.l{left:2px}.rz.r{right:2px}
+.rz.se{right:2px;bottom:2px;width:15px;height:15px;border-radius:50%;cursor:nwse-resize}
+@media(prefers-reduced-motion:reduce){#overlay .pop{animation:none}}
 @keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
 #overlay .pop{animation:pop .22s ease-out}
 /* controls + per-word chips */
@@ -66,14 +74,19 @@ button.small{padding:.3rem .7rem;font-size:.85rem}
   <p id="ctlrow">
     <label>Style <select id="style"></select></label>
     <label>Font <select id="gfont"></select></label>
-    <label>Size <input id="gsize" type="number" min="20" max="220" step="2" placeholder="auto"></label>
+    <label>Text size <input id="gsize" type="range" min="24" max="220" step="2"> <span id="gsizeval" class="hint"></span></label>
     <label>Highlight <input id="ghl" type="color" value="#ffe500"></label>
-    <button id="posreset" class="small" type="button" title="recenter captions">⤢ reset position</button>
+    <button id="posreset" class="small" type="button" title="recenter caption box and restore its size">⤢ reset box</button>
   </p>
-  <p class="hint" style="margin:.2rem 0 .4rem">Tip: drag the caption in the preview to move it anywhere.</p>
+  <p class="hint" style="margin:.2rem 0 .4rem">Drag the box to move it, drag its side handles to resize the box, and drag the corner (or pinch) to resize the text.</p>
   <div id="pvwrap">
     <video id="preview" controls playsinline></video>
-    <div id="overlay"></div>
+    <div id="capbox" class="hidden">
+      <div id="overlay"></div>
+      <span class="rz l" data-h="l" title="drag to resize box width"></span>
+      <span class="rz r" data-h="r" title="drag to resize box width"></span>
+      <span class="rz se" data-h="se" title="drag to resize text — or pinch"></span>
+    </div>
   </div>
   <p style="color:#777;margin:.2rem 0 1rem">↑ Live preview (approximate). The burned video is full quality.</p>
   <div id="segs"></div>
@@ -150,9 +163,22 @@ $("style").onchange=()=>{applyOverlayStyle();renderCaption();};
 const fontOpts='<option value="">(style default)</option>'+FONTS.map(f=>`<option value="${f}">${f}</option>`).join("");
 $("gfont").innerHTML=fontOpts; $("wefont").innerHTML=fontOpts;
 $("gfont").onchange=()=>{applyOverlayStyle();renderCaption();};
-$("gsize").oninput=()=>{applyOverlayStyle();renderCaption();};
 const effFont=st=>$("gfont").value||st.font_name;
-const effSize=st=>parseInt($("gsize").value)||st.font_size;
+
+// text size: slider / corner-drag / pinch; null = use the style's own size
+let sizeOverride=null;
+const effSize=st=>sizeOverride!=null?sizeOverride:st.font_size;
+function syncSizeUI(){const st=STYLES[$("style").value];if(!st)return;
+  $("gsize").value=Math.round(effSize(st));
+  $("gsizeval").textContent=sizeOverride!=null?Math.round(sizeOverride)+"px":"auto";}
+$("gsize").oninput=()=>{sizeOverride=parseInt($("gsize").value);syncSizeUI();applyOverlayStyle();renderCaption();};
+
+// caption-box width: null = style's own margins; else 0..1 of the video width
+let boxW=null;
+const effBoxW=()=>{if(boxW!=null)return boxW;const st=STYLES[$("style").value];
+  if(!st)return .9;const ml=st.margin_l||60,mr=st.margin_r||60,W=st.play_res_x||1080;
+  return Math.max(.2,(W-ml-mr)/W);};
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 
 // highlight colour override (pink or any) — &HAABBGGRR <-> #rrggbb
 function hexToAss(h){h=h.replace('#','');return "&H00"+h.slice(4,6)+h.slice(2,4)+h.slice(0,2);}
@@ -161,21 +187,52 @@ let hlOverride=null;
 const effHi=st=>hlOverride||st.highlight_color;
 $("ghl").oninput=()=>{hlOverride=hexToAss($("ghl").value);lastCapKey=null;renderCaption();};
 
-// drag-to-move caption position (normalised 0..1 of the video)
-let gpos={x:null,y:null}, dragging=false;
-function moveTo(e){const r=pv.getBoundingClientRect();
-  const cx=(e.touches?e.touches[0].clientX:e.clientX), cy=(e.touches?e.touches[0].clientY:e.clientY);
-  gpos.x=Math.min(1,Math.max(0,(cx-r.left)/r.width));
-  gpos.y=Math.min(1,Math.max(0,(cy-r.top)/r.height));positionCap();}
-function positionCap(){const cap=$("overlay").firstChild;if(!cap)return;
-  if(gpos.x==null){cap.style.position="";cap.style.left="";cap.style.top="";cap.style.transform="";return;}
-  cap.style.position="absolute";cap.style.left=(gpos.x*100)+"%";cap.style.top=(gpos.y*100)+"%";
-  cap.style.transform="translate(-50%,-50%)";}
-document.addEventListener("mousemove",e=>{if(dragging)moveTo(e);});
-document.addEventListener("mouseup",()=>{dragging=false;});
-document.addEventListener("touchmove",e=>{if(dragging){moveTo(e);e.preventDefault();}},{passive:false});
-document.addEventListener("touchend",()=>{dragging=false;});
-$("posreset").onclick=()=>{gpos={x:null,y:null};lastCapKey=null;renderCaption();};
+// --- caption box: drag to move, side handles resize width, corner/pinch resize text ---
+let gpos={x:null,y:null};   // box centre, normalised; null = style default placement
+let drag=null;
+const ptX=e=>e.touches?e.touches[0].clientX:e.clientX;
+const ptY=e=>e.touches?e.touches[0].clientY:e.clientY;
+function startDrag(mode,e){
+  const r=pv.getBoundingClientRect(), cxN=(gpos.x!=null?gpos.x:0.5);
+  drag={mode, y:ptY(e), size:effSize(STYLES[$("style").value]||{}),
+        cx:r.left+cxN*r.width, pw:r.width||1, ph:r.height||1, top:r.top, left:r.left};
+  e.preventDefault(); e.stopPropagation();
+}
+function onDragMove(e){
+  if(!drag)return;
+  if(drag.mode==="move"){
+    gpos.x=clamp((ptX(e)-drag.left)/drag.pw,0,1);
+    gpos.y=clamp((ptY(e)-drag.top)/drag.ph,0,1);
+    positionBox();
+  }else if(drag.mode==="l"||drag.mode==="r"){
+    boxW=clamp(2*Math.abs(ptX(e)-drag.cx)/drag.pw,.2,1);
+    positionBox();
+  }else if(drag.mode==="se"){
+    sizeOverride=clamp(Math.round(drag.size+(ptY(e)-drag.y)/scale),24,240);
+    syncSizeUI(); applyOverlayStyle(); renderCaption();
+  }
+}
+document.addEventListener("mousemove",onDragMove);
+document.addEventListener("mouseup",()=>{drag=null;});
+document.addEventListener("touchmove",e=>{if(drag){onDragMove(e);e.preventDefault();}},{passive:false});
+document.addEventListener("touchend",()=>{drag=null;});
+(function wireBox(){
+  const cb=$("capbox");
+  const onBody=e=>{if(e.target===cb||e.target.closest("#overlay"))startDrag("move",e);};
+  cb.addEventListener("mousedown",onBody);
+  cb.addEventListener("touchstart",onBody,{passive:false});
+  cb.querySelectorAll(".rz").forEach(h=>{
+    h.addEventListener("mousedown",e=>startDrag(h.dataset.h,e));
+    h.addEventListener("touchstart",e=>startDrag(h.dataset.h,e),{passive:false});
+  });
+  // trackpad pinch arrives as ctrl+wheel; scales the text
+  cb.addEventListener("wheel",e=>{
+    if(!e.ctrlKey)return; e.preventDefault();
+    sizeOverride=clamp(Math.round(effSize(STYLES[$("style").value]||{})-e.deltaY*0.6),24,240);
+    syncSizeUI(); applyOverlayStyle(); renderCaption();
+  },{passive:false});
+})();
+$("posreset").onclick=()=>{gpos={x:null,y:null};boxW=null;lastCapKey=null;positionBox();renderCaption();};
 
 // --- per-word style editor (floating panel) ---
 let weSeg=-1, weTok=-1;
@@ -297,20 +354,33 @@ function applyOverlayStyle(){
   const st=STYLES[$("style").value];if(!st)return;
   lastCapKey=null;  // force a rebuild after a style/size change
   if(!hlOverride){try{$("ghl").value=assToHex(st.highlight_color);}catch(e){}}
+  if(sizeOverride==null)syncSizeUI();          // slider shows the style's own size
+  $("capbox").classList.remove("hidden");
   computeScale();
   const o=$("overlay");
   o.style.fontFamily=fontStack(effFont(st));
   o.style.fontWeight=st.bold?"900":"400";
   o.style.fontSize=(effSize(st)*scale)+"px";
-  // centre-screen styles (alignment 5) sit in the middle; others at the bottom
-  const centred=st.alignment===5;
-  o.style.alignItems=centred?"center":"flex-end";
-  o.style.paddingBottom=centred?"0":(st.margin_v*scale)+"px";
   const stroke=Math.max(1,st.outline*scale);
   o.style.webkitTextStrokeWidth=stroke+"px";
   o.style.webkitTextStrokeColor=assColor(st.outline_color);
   o.style.paintOrder="stroke fill";
   o.style.textShadow=`0 ${Math.max(1,st.shadow*scale)}px ${2*scale}px rgba(0,0,0,.5)`;
+  positionBox();
+}
+function positionBox(){
+  const cb=$("capbox"), st=STYLES[$("style").value]; if(!st)return;
+  cb.style.width=(effBoxW()*(pv.clientWidth||1))+"px";
+  cb.style.left=cb.style.top=cb.style.bottom=cb.style.transform="";
+  if(gpos.x!=null){
+    cb.style.left=(gpos.x*100)+"%"; cb.style.top=(gpos.y*100)+"%";
+    cb.style.transform="translate(-50%,-50%)";
+  }else if(st.alignment===5){
+    cb.style.left="50%"; cb.style.top="50%"; cb.style.transform="translate(-50%,-50%)";
+  }else{
+    cb.style.left="50%"; cb.style.transform="translateX(-50%)";
+    cb.style.bottom=(st.margin_v*scale)+"px";
+  }
 }
 
 function _phraseGroups(toks){
@@ -329,9 +399,9 @@ function renderCaption(){
   const st=STYLES[$("style").value];if(!st)return;
   const t=pv.currentTime;
   const seg=segments.find(s=>t>=s.start && t<s.end);
-  if(!seg){o.innerHTML="";lastCapKey=null;return;}
+  if(!seg){o.innerHTML="&nbsp;";lastCapKey=null;positionBox();return;}
   const toks=(seg.text||"").trim().split(/\s+/).filter(Boolean);
-  if(!toks.length){o.innerHTML="";lastCapKey=null;return;}
+  if(!toks.length){o.innerHTML="&nbsp;";lastCapKey=null;positionBox();return;}
   let times;
   if(seg.words && seg.words.length===toks.length){times=seg.words.map(w=>w.start);}
   else{const d=(seg.end-seg.start)/toks.length;times=toks.map((_,i)=>seg.start+i*d);}
@@ -389,11 +459,7 @@ function renderCaption(){
     toks.forEach((_,i)=>span(i,i<=active?hi:rest));
   }
   o.append(cap);
-  // draggable to reposition
-  cap.style.pointerEvents="auto";cap.style.cursor="move";
-  cap.onmousedown=e=>{dragging=true;moveTo(e);e.preventDefault();};
-  cap.ontouchstart=e=>{dragging=true;moveTo(e);e.preventDefault();};
-  positionCap();
+  positionBox();
 }
 
 // --- burn -----------------------------------------------------------------
@@ -402,9 +468,10 @@ $("burn").onclick=async()=>{
   try{
     const styleOv={};
     if($("gfont").value)styleOv.font_name=$("gfont").value;
-    const gs=parseInt($("gsize").value);if(gs)styleOv.font_size=gs;
+    if(sizeOverride!=null)styleOv.font_size=Math.round(sizeOverride);
     if(hlOverride)styleOv.highlight_color=hlOverride;
     if(gpos.x!=null){styleOv.pos_x=gpos.x;styleOv.pos_y=gpos.y;}
+    if(boxW!=null){const m=Math.round((1-boxW)/2*1080);styleOv.margin_l=m;styleOv.margin_r=m;}
     const r=await fetch("/export",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({job,segments,preset:$("style").value,style:styleOv,want_srt:$("srt").checked})});
     if(!r.ok)throw new Error((await r.json()).detail||r.statusText);
