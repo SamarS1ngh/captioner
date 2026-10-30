@@ -41,6 +41,8 @@ class AssStyle:
     alignment: int = 2  # 2 = bottom-centre, 5 = screen centre
     uppercase: bool = False
     palette: tuple = ()  # mrbeast per-word colour cycle
+    pos_x: float = -1.0  # 0..1 of PlayResX; <0 = use alignment+margin instead
+    pos_y: float = -1.0  # 0..1 of PlayResY
     play_res_x: int = 1080
     play_res_y: int = 1920
 
@@ -295,6 +297,13 @@ def build_ass(t: Transcript, style: AssStyle = AssStyle()) -> str:
         if not words:
             continue
         lines.extend(render(words, seg, style))
+    # custom drag position: pin every event at (pos_x,pos_y), centred on it
+    if style.pos_x >= 0 and style.pos_y >= 0:
+        x = round(style.pos_x * style.play_res_x)
+        y = round(style.pos_y * style.play_res_y)
+        prefix = f"{{\\an5\\pos({x},{y})}}"
+        lines = [l.replace(",Default,,0,0,0,,", ",Default,,0,0,0,," + prefix, 1)
+                 for l in lines]
     return header + "\n".join(lines) + "\n"
 
 

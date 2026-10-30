@@ -142,3 +142,12 @@ def test_mrbeast_colors_each_word():
     out = build_ass(_one_seg_transcript(), get_style("mrbeast"))
     dl = [l for l in out.splitlines() if l.startswith("Dialogue:")][0]
     assert dl.count("\\c&H") >= 2  # a colour override per word
+
+
+def test_custom_drag_position_pins_events():
+    from dataclasses import replace
+    st = replace(get_style("karaoke"), pos_x=0.5, pos_y=0.25)
+    out = build_ass(_one_seg_transcript(), st)
+    assert "\\pos(540,480)" in out  # 1080*0.5, 1920*0.25
+    assert out.count("\\pos(") == len([l for l in out.splitlines()
+                                       if l.startswith("Dialogue:")])
