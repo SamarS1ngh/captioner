@@ -286,15 +286,25 @@ let STYLES={}, scale=1;
 const status=t=>$("status").textContent=t;
 const prettyStyle=n=>n.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
 
-// --- Groq API key (saved in this browser only) ---
+// --- Groq API key: saved in this browser AND in a per-machine file on disk,
+// so it sticks across app launches even if the port/origin or cache changes ---
 function markKey(k){$("keybox").classList.toggle("set",!!(k&&k.trim()));}
+function setApiKey(k){$("apikey").value=k;markKey(k);
+  try{localStorage.setItem("groqKey",k);}catch(e){}
+  $("keybox").open=!k.trim();}
 (function initKey(){
   let k="";try{k=localStorage.getItem("groqKey")||"";}catch(e){}
-  $("apikey").value=k;markKey(k);
-  if(!k.trim())$("keybox").open=true;       // nudge first-time users to add it
+  setApiKey(k);
+  if(!k.trim()){                            // browser empty -> try the on-disk store
+    fetch("/key").then(r=>r.json()).then(d=>{if(d.key&&!$("apikey").value.trim())setApiKey(d.key);}).catch(()=>{});
+  }
 })();
+let keySaveTimer=null;
 $("apikey").oninput=()=>{const k=$("apikey").value.trim();
-  try{localStorage.setItem("groqKey",k);}catch(e){}markKey(k);};
+  try{localStorage.setItem("groqKey",k);}catch(e){}markKey(k);
+  clearTimeout(keySaveTimer);               // debounce the disk write while typing/pasting
+  keySaveTimer=setTimeout(()=>{const fd=new FormData();fd.append("key",k);
+    fetch("/key",{method:"POST",body:fd}).catch(()=>{});},600);};
 
 let loadTimer=null, loadStart=0, loadBase="";
 function renderLoad(){

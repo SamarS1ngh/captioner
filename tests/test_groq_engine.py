@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -36,8 +37,14 @@ def _patch(monkeypatch, cleanup_map):
         if url.endswith("/audio/transcriptions"):
             return FakeResp(200, TRANSCRIBE_PAYLOAD)
         if url.endswith("/chat/completions"):
-            text = kw["json"]["messages"][-1]["content"]
-            return FakeResp(200, {"choices": [{"message": {"content": cleanup_map[text]}}]})
+            # cleanup is batched: numbered lines in, numbered lines out
+            content = kw["json"]["messages"][-1]["content"]
+            out = []
+            for line in content.splitlines():
+                m = re.match(r"^\s*(\d+)\|\s*(.*)$", line)
+                if m:
+                    out.append(f"{m.group(1)}| {cleanup_map[m.group(2)]}")
+            return FakeResp(200, {"choices": [{"message": {"content": "\n".join(out)}}]})
         raise AssertionError(url)
     monkeypatch.setattr(groq_engine.requests, "post", fake_post)
 
@@ -114,3 +121,39 @@ def test_language_passed_to_transcribe(monkeypatch, tmp_path):
     groq_engine.transcribe_and_romanize(str(tmp_path / "a.flac"), "gsk",
                                         language="ta", romanize=False)
     assert seen["lang"] == "ta"
+
+
+def test_cleanup_is_batched_single_call(monkeypatch, tmp_path):
+    calls = {"chat": 0}
+
+    def fake_post(url, **kw):
+        if url.endswith("/audio/transcriptions"):
+            return FakeResp(200, TRANSCRIBE_PAYLOAD)
+        if url.endswith("/chat/completions"):
+            calls["chat"] += 1
+            content = kw["json"]["messages"][-1]["content"]
+            out = [f"{m.group(1)}| x{m.group(1)}"
+                   for line in content.splitlines()
+                   if (m := re.match(r"^\s*(\d+)\|\s*(.*)$", line))]
+            return FakeResp(200, {"choices": [{"message": {"content": "\n".join(out)}}]})
+        raise AssertionError(url)
+    monkeypatch.setattr(groq_engine.requests, "post", fake_post)
+    wav = tmp_path / "a.wav"; wav.write_bytes(b"x")
+    t = groq_engine.transcribe_and_romanize(str(wav), "gsk")
+    assert calls["chat"] == 1            # both segments cleaned in ONE request
+    assert len(t.segments) == 2
+
+
+def test_retries_on_429(monkeypatch):
+    seq = [429, 429, 200]
+
+    def fake_post(url, **kw):
+        code = seq.pop(0)
+        payload = ({"choices": [{"message": {"content": "1| ok"}}]}
+                   if code == 200 else {"error": "rate limited"})
+        return FakeResp(code, payload)
+    monkeypatch.setattr(groq_engine.requests, "post", fake_post)
+    monkeypatch.setattr(groq_engine.time, "sleep", lambda *a, **k: None)
+    out = groq_engine._cleanup("1| hi", "gsk", "sys")
+    assert out.strip() == "1| ok"
+    assert seq == []                     # burned through both 429s then succeeded

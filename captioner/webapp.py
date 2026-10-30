@@ -23,6 +23,10 @@ from captioner.srt import build_srt
 
 STATIC = Path(__file__).parent / "static"
 WORK_ROOT = Path(tempfile.gettempdir()) / "captioner-jobs"
+# Durable, per-machine store for the Groq key so it survives across app launches
+# regardless of port/origin or a cleared browser cache. The user's own machine,
+# owner-only perms; still only ever sent to Groq.
+KEY_FILE = Path.home() / ".captioner" / "groq_key"
 
 app = FastAPI(title="Captioner")
 
@@ -55,6 +59,34 @@ def styles() -> dict:
         ],
         "languages": LANG_MENU,
     }
+
+
+@app.get("/key")
+def get_key() -> dict:
+    """The saved Groq key (env var wins, else the on-disk store). For prefill."""
+    env = os.environ.get("GROQ_API_KEY", "").strip()
+    if env:
+        return {"key": env}
+    try:
+        return {"key": KEY_FILE.read_text(encoding="utf-8").strip()}
+    except OSError:
+        return {"key": ""}
+
+
+@app.post("/key")
+def set_key(key: str = Form("")) -> dict:
+    """Persist (or clear) the Groq key on disk, owner-only."""
+    key = (key or "").strip()
+    try:
+        if key:
+            KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            KEY_FILE.write_text(key, encoding="utf-8")
+            os.chmod(KEY_FILE, 0o600)
+        elif KEY_FILE.exists():
+            KEY_FILE.unlink()
+    except OSError as exc:
+        raise HTTPException(500, f"Could not save key: {exc}")
+    return {"ok": True}
 
 
 @app.post("/process")

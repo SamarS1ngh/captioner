@@ -104,3 +104,21 @@ def test_export_override_on_top_of_preset(tmp_path, monkeypatch):
     assert r.status_code == 200
     style_line = next(l for l in captured["ass"].splitlines() if l.startswith("Style:"))
     assert style_line.split(",")[2] == "120"  # override wins over preset's 88
+
+
+def test_key_persists_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "KEY_FILE", tmp_path / ".captioner" / "groq_key")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    assert client.get("/key").json()["key"] == ""        # nothing saved yet
+    assert client.post("/key", data={"key": "gsk_live_xyz"}).json()["ok"] is True
+    assert (tmp_path / ".captioner" / "groq_key").read_text() == "gsk_live_xyz"
+    assert client.get("/key").json()["key"] == "gsk_live_xyz"  # survives
+    client.post("/key", data={"key": ""})                 # clearing removes it
+    assert client.get("/key").json()["key"] == ""
+
+
+def test_env_key_overrides_file(tmp_path, monkeypatch):
+    kf = tmp_path / "groq_key"; kf.write_text("gsk_file")
+    monkeypatch.setattr(webapp, "KEY_FILE", kf)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_env_wins")
+    assert client.get("/key").json()["key"] == "gsk_env_wins"

@@ -59,7 +59,10 @@ def _wire_bundled_ffmpeg(base: str) -> None:
 
 
 def _pick_port(preferred: int = 8000) -> int:
-    for port in (preferred, 0):
+    # Walk a fixed ladder before giving up to a random port, so the origin (and
+    # therefore the saved API key in localStorage) stays stable across launches.
+    candidates = list(range(preferred, preferred + 16)) + [0]
+    for port in candidates:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             s.bind(("127.0.0.1", port))

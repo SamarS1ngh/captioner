@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 
 import requests
 
@@ -28,6 +30,11 @@ CLEANUP_MODEL = "openai/gpt-oss-120b"   # large model: no hallucination/translat
 # back together with each chunk's start time added to its timestamps.
 CHUNK_SECS = 600          # ~10 min of 16 kHz mono FLAC stays well under the cap
 _CHUNK_SLOP = 15          # don't chunk something only a little over the limit
+# Romanize all segments together in one LLM request per batch, not one per
+# segment: a short clip has dozens of segments and per-segment calls blow past
+# Groq's requests-per-minute cap (429).
+_BATCH = 40
+_NUM_PREFIX = re.compile(r"^\s*\d+\s*[\|.):]\s*")
 # urllib's default UA is 403'd by Groq's edge; requests' UA is fine, but be explicit.
 _HEADERS_UA = {"User-Agent": "captioner/1.0"}
 
@@ -75,23 +82,44 @@ LANG_MENU: list[dict] = [
 ]
 
 
-def _cleanup_system(language: str) -> str:
+def _cleanup_system(language: str, batch: bool = False) -> str:
     """System prompt that romanizes a given language into natural Latin script,
     keeping code-switched English correct (the Hinglish approach, generalized)."""
     name = LANGUAGES.get(language or "", "the source language")
-    return (
+    base = (
         f"You convert auto-transcribed {name} subtitles into natural ROMANIZED text, "
         "the way creators type on Instagram/YouTube. Rules: native-language words -> "
         "casual Latin letters, written phonetically and naturally. English (or other "
         "already-Latin) words -> correct English spelling (the transcript may spell them "
         "phonetically in the native script - fix those). Keep the meaning and word order. "
         "Never translate into English. If a line is already correct English, leave it "
-        "unchanged. Output ONLY the cleaned line - no quotes, no notes, no explanation."
+        "unchanged."
     )
+    if batch:
+        return base + (
+            " The input is numbered lines, each like `3| text`. Return EXACTLY the same "
+            "number of lines, each prefixed with its own number and `| `, in the same "
+            "order. Clean each line's text per the rules above. Never merge, split, add, "
+            "reorder, or drop lines. Output ONLY the numbered lines - no notes."
+        )
+    return base + " Output ONLY the cleaned line - no quotes, no notes, no explanation."
 
 
 class GroqError(RuntimeError):
     pass
+
+
+def _post_with_retry(url: str, *, max_tries: int = 5, **kw):
+    """POST, retrying on HTTP 429 (rate limit) with exponential backoff."""
+    delay = 2.0
+    resp = None
+    for attempt in range(max_tries):
+        resp = requests.post(url, **kw)
+        if resp.status_code != 429 or attempt == max_tries - 1:
+            return resp
+        time.sleep(delay)
+        delay = min(delay * 2, 20)
+    return resp
 
 
 def _transcribe(audio_path: str, api_key: str, language: str = "hi") -> dict:
@@ -108,7 +136,7 @@ def _transcribe(audio_path: str, api_key: str, language: str = "hi") -> dict:
     if language:
         data["language"] = language
     with open(audio_path, "rb") as f:
-        resp = requests.post(
+        resp = _post_with_retry(
             f"{API_ROOT}/audio/transcriptions",
             headers={"Authorization": f"Bearer {api_key}", **_HEADERS_UA},
             data=data,
@@ -180,7 +208,7 @@ def _collect(audio_path: str, key: str, language: str = "hi"):
 
 
 def _cleanup(text: str, api_key: str, system: str, model: str = CLEANUP_MODEL) -> str:
-    resp = requests.post(
+    resp = _post_with_retry(
         f"{API_ROOT}/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", **_HEADERS_UA},
         json={
@@ -196,6 +224,24 @@ def _cleanup(text: str, api_key: str, system: str, model: str = CLEANUP_MODEL) -
     if resp.status_code != 200:
         raise GroqError(f"cleanup failed ({resp.status_code}): {resp.text[:300]}")
     return resp.json()["choices"][0]["message"]["content"].strip()
+
+
+def _romanize_lines(texts: list[str], api_key: str, system: str) -> list[str]:
+    """Romanize many segment texts with as few LLM calls as possible.
+
+    Sends up to _BATCH segments per request (numbered lines in, numbered lines
+    out). If a batch's response doesn't line up 1:1, that batch falls back to the
+    raw native-script text rather than risk misaligning captions.
+    """
+    out: list[str] = []
+    for i in range(0, len(texts), _BATCH):
+        chunk = texts[i:i + _BATCH]
+        numbered = "\n".join(f"{j + 1}| {t}" for j, t in enumerate(chunk))
+        cleaned = _cleanup(numbered, api_key, system)
+        lines = [_NUM_PREFIX.sub("", ln).strip()
+                 for ln in cleaned.splitlines() if ln.strip()]
+        out.extend(lines if len(lines) == len(chunk) else chunk)
+    return out
 
 
 def _bucket_words(words: list[dict], start: float, end: float) -> list[Word]:
@@ -226,16 +272,20 @@ def transcribe_and_romanize(audio_path: str, api_key: str,
     if not key:
         raise GroqError("no API key")
     words, raw_segments, detected = _collect(audio_path, key, language)
-    system = _cleanup_system(language or detected) if romanize else ""
+    # (segment dict, raw text) for non-empty segments only
+    kept = [(s, (s.get("text") or "").strip()) for s in raw_segments]
+    kept = [(s, t) for s, t in kept if t]
+    raw_texts = [t for _, t in kept]
+    if romanize:
+        system = _cleanup_system(language or detected, batch=True)
+        cleaned_texts = _romanize_lines(raw_texts, key, system)
+    else:
+        cleaned_texts = raw_texts
     segments: list[Segment] = []
-    for s in raw_segments:
-        raw_text = (s.get("text") or "").strip()
-        if not raw_text:
-            continue
+    for (s, raw_text), cleaned in zip(kept, cleaned_texts):
         start, end = float(s["start"]), float(s["end"])
-        cleaned = (_cleanup(raw_text, key, system) or raw_text) if romanize else raw_text
         seg_words = _bucket_words(words, start, end)
-        segments.append(Segment(text=cleaned, start=start, end=end, words=seg_words))
+        segments.append(Segment(text=cleaned or raw_text, start=start, end=end, words=seg_words))
     return Transcript(segments=segments, language=detected)
 
 
