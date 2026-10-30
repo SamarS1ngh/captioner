@@ -32,12 +32,12 @@ select{padding:.4rem;font-size:1rem}
 #overlay{pointer-events:none;line-height:1.15;text-align:center;padding:.1em .15em}
 #overlay .cap{display:inline-block;max-width:100%}
 #overlay span{white-space:pre-wrap}
-/* one small corner grip for mouse users (touch resizes by pinch instead) */
-.rz{position:absolute;right:1px;bottom:1px;width:13px;height:13px;border-radius:50%;
+/* corner grip: drag to reshape the caption box width */
+.rz{position:absolute;right:1px;bottom:1px;width:14px;height:14px;border-radius:50%;
   background:rgba(255,255,255,.95);box-shadow:0 0 0 1px rgba(0,0,0,.45);
-  opacity:0;transition:opacity .12s;cursor:nwse-resize;z-index:6}
+  opacity:0;transition:opacity .12s;cursor:ew-resize;z-index:6;touch-action:none}
 #capbox:hover .rz,#capbox.rzon .rz{opacity:1}
-@media(hover:none){.rz{display:none}}
+@media(hover:none){.rz{opacity:.9}}  /* always visible on touch (no hover) */
 @media(prefers-reduced-motion:reduce){#overlay .pop{animation:none}}
 @keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
 #overlay .pop{animation:pop .22s ease-out}
@@ -83,7 +83,7 @@ button.small{padding:.3rem .7rem;font-size:.85rem}
     <label>Highlight <input id="ghl" type="color" value="#ffe500"></label>
     <button id="posreset" class="small" type="button" title="recenter caption box and restore its size">⤢ reset box</button>
   </p>
-  <p class="hint" style="margin:.2rem 0 .4rem">Drag the caption to move it; drag the corner dot or scroll over it to resize. On a trackpad or phone, pinch to resize and rotate.</p>
+  <p class="hint" style="margin:.2rem 0 .4rem">Drag the caption to move it; drag the corner dot to reshape the box. Scroll over it, pinch (trackpad/phone), or use the slider to resize the text.</p>
   <div id="pvwrap">
     <video id="preview" controls playsinline></video>
     <div id="capbox" class="hidden">
@@ -176,8 +176,9 @@ function syncSizeUI(){const st=STYLES[$("style").value];if(!st)return;
   $("gsizeval").textContent=sizeOverride!=null?Math.round(sizeOverride)+"px":"auto";}
 $("gsize").oninput=()=>{sizeOverride=parseInt($("gsize").value);syncSizeUI();applyOverlayStyle();renderCaption();};
 
-// caption box wraps at the style's own margins (text scales, not the box)
-const effBoxW=()=>{const st=STYLES[$("style").value];
+// caption-box width: null = style's own margins; else 0..1 of the video width
+let boxW=null;
+const effBoxW=()=>{if(boxW!=null)return boxW;const st=STYLES[$("style").value];
   if(!st)return .9;const ml=st.margin_l||60,mr=st.margin_r||60,W=st.play_res_x||1080;
   return Math.max(.2,(W-ml-mr)/W);};
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
@@ -201,44 +202,47 @@ const curSize=()=>effSize(STYLES[$("style").value]||{});
 function startMove(){const r=pv.getBoundingClientRect();
   drag={mode:"move",pw:r.width||1,ph:r.height||1,top:r.top,left:r.left};
   $("capbox").classList.add("rzon");}
-function startResize(e){drag={mode:"size",y:ptY(e),size:curSize()};$("capbox").classList.add("rzon");}
+function startBox(e){const r=pv.getBoundingClientRect(), cxN=(gpos.x!=null?gpos.x:0.5);
+  drag={mode:"box",cx:r.left+cxN*r.width,pw:r.width||1};$("capbox").classList.add("rzon");}
 function moveBox(e){
   gpos.x=clamp((ptX(e)-drag.left)/drag.pw,0,1);
   gpos.y=clamp((ptY(e)-drag.top)/drag.ph,0,1);positionBox();}
+function resizeBox(e){boxW=clamp(2*Math.abs(ptX(e)-drag.cx)/drag.pw,.25,1);positionBox();}
 function setSize(px){sizeOverride=clamp(Math.round(px),24,300);
   syncSizeUI();applyOverlayStyle();renderCaption();}
 function endGesture(){drag=null;pinch=null;$("capbox").classList.remove("rzon");}
 (function wireBox(){
   const cb=$("capbox"), grip=cb.querySelector(".rz");
-  // mouse: corner grip resizes text, body drags to move
-  grip.addEventListener("mousedown",e=>{startResize(e);e.stopPropagation();e.preventDefault();});
+  // corner grip reshapes the box width; body drags to move
+  grip.addEventListener("mousedown",e=>{startBox(e);e.stopPropagation();e.preventDefault();});
+  grip.addEventListener("touchstart",e=>{startBox(e);e.stopPropagation();e.preventDefault();},{passive:false});
   cb.addEventListener("mousedown",e=>{if(e.button===0&&e.target!==grip){startMove();e.preventDefault();}});
   document.addEventListener("mousemove",e=>{if(!drag)return;
-    if(drag.mode==="move")moveBox(e);
-    else setSize(drag.size+(e.clientY-drag.y)/scale);});   // drag grip down = bigger
+    drag.mode==="box"?resizeBox(e):moveBox(e);});
   document.addEventListener("mouseup",endGesture);
-  // mouse wheel / trackpad pinch over the box resizes text
+  // mouse wheel / trackpad pinch over the box resizes the TEXT
   cb.addEventListener("wheel",e=>{e.preventDefault();pinch=null;
     setSize(curSize()-e.deltaY*(e.ctrlKey?0.6:0.3));},{passive:false});
-  // touch: one finger moves, two fingers pinch-scale + rotate
+  // touch: one finger moves (or grip resizes box), two fingers pinch text + rotate
   cb.addEventListener("touchstart",e=>{
     if(e.touches.length>=2){
       pinch={d:tDist(e.touches)||1,a:tAng(e.touches),size:curSize(),rot:rot};
       drag=null;$("capbox").classList.add("rzon");
-    }else{startMove();}
+    }else if(!drag){startMove();}   // grip's own touchstart already set drag
     e.preventDefault();
   },{passive:false});
   cb.addEventListener("touchmove",e=>{
     if(pinch&&e.touches.length>=2){
       setSize(pinch.size*(tDist(e.touches)/pinch.d));
       rot=pinch.rot+(tAng(e.touches)-pinch.a);positionBox();
-    }else if(drag){moveBox(e);}
+    }else if(drag&&drag.mode==="box"){resizeBox(e);}
+    else if(drag){moveBox(e);}
     e.preventDefault();
   },{passive:false});
   cb.addEventListener("touchend",endGesture);
   cb.addEventListener("touchcancel",endGesture);
 })();
-$("posreset").onclick=()=>{gpos={x:null,y:null};rot=0;sizeOverride=null;lastCapKey=null;
+$("posreset").onclick=()=>{gpos={x:null,y:null};boxW=null;rot=0;sizeOverride=null;lastCapKey=null;
   syncSizeUI();applyOverlayStyle();renderCaption();};
 
 // --- per-word style editor (floating panel) ---
@@ -483,6 +487,7 @@ $("burn").onclick=async()=>{
     if(hlOverride)styleOv.highlight_color=hlOverride;
     if(gpos.x!=null){styleOv.pos_x=gpos.x;styleOv.pos_y=gpos.y;}
     if(rot)styleOv.angle=((Math.round(-rot)%360)+360)%360;  // CSS CW -> ASS CCW
+    if(boxW!=null){const m=Math.round((1-boxW)/2*1080);styleOv.margin_l=m;styleOv.margin_r=m;}
     const r=await fetch("/export",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({job,segments,preset:$("style").value,style:styleOv,want_srt:$("srt").checked})});
     if(!r.ok)throw new Error((await r.json()).detail||r.statusText);
