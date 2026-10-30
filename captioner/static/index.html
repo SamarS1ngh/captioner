@@ -3,41 +3,141 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Captioner</title>
 <style>
-body{font:16px system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#222}
-h1{margin-bottom:.2rem}
-#drop{border:2px dashed #999;border-radius:12px;padding:2.5rem;text-align:center;cursor:pointer}
-#drop.over{background:#fff8d6;border-color:#e0a800}
-.seg{display:flex;gap:.5rem;margin:.4rem 0;align-items:center}
-.seg small{color:#777;width:5.5rem;flex:none}
-.seg input{flex:1;padding:.4rem;font-size:1rem}
-button{padding:.6rem 1.2rem;font-size:1rem;border-radius:8px;border:0;background:#222;color:#fff;cursor:pointer}
-button:disabled{opacity:.5}
-#status{color:#555;margin:.8rem 0}
-video{max-width:100%;max-height:70vh;display:block}
-.hidden{display:none!important}  /* beats #loader{display:flex} specificity */
-select{padding:.4rem;font-size:1rem}
-/* loader */
-#loader{display:flex;gap:.6rem;align-items:center;margin:1rem 0}
-.spin{width:22px;height:22px;border:3px solid #ddd;border-top-color:#e0a800;border-radius:50%;animation:spin 1s linear infinite}
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800;900&family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+:root{
+  --bg:#141019; --surface:#1d1826; --surface-2:#272031; --surface-3:#322a39;
+  --line:#3a3246; --line-2:#4d4459;
+  --text:#f5f2f8; --muted:#a79fb4; --faint:#7d7589;
+  --accent:#ffe23d; --accent-2:#ffd000; --accent-ink:#231a00;
+  --focus:#8fd0ff; --danger:#ff6b6b; --ok:#64e0a3;
+  --font-display:'Archivo',system-ui,sans-serif;
+  --font-ui:'Hanken Grotesk',system-ui,sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  --radius:14px; --radius-sm:9px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:var(--font-ui);font-size:16px;line-height:1.55;color:var(--text);
+  background:var(--bg);
+  background-image:radial-gradient(880px 480px at 86% -8%,rgba(255,226,61,.08),transparent 60%);
+  background-attachment:fixed}
+.wrap{max-width:1140px;margin:0 auto;padding:clamp(1rem,3vw,2.4rem) clamp(1rem,3vw,2rem) 5rem}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2.5px solid var(--focus);outline-offset:2px;border-radius:4px}
+
+/* masthead */
+.masthead{display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap;
+  padding-bottom:1.1rem;border-bottom:1px solid var(--line);margin-bottom:1.9rem}
+.brand{font-family:var(--font-display);font-weight:900;font-size:1.55rem;letter-spacing:-.035em}
+.brand b{color:var(--accent)}
+.tagline{margin:0;color:var(--muted);font-size:.95rem;font-weight:500}
+
+/* hero: the headline is styled as a real burned caption */
+.intro{margin:.4rem 0 2.1rem}
+.hero{font-family:var(--font-display);font-weight:800;letter-spacing:-.025em;
+  font-size:clamp(1.85rem,5vw,3.05rem);line-height:1.05;margin:0 0 1rem;max-width:18ch}
+.hero .hl{background:var(--accent);color:var(--accent-ink);padding:0 .14em;border-radius:.08em;
+  -webkit-box-decoration-break:clone;box-decoration-break:clone}
+.lede{margin:0;color:var(--muted);font-size:1.05rem;max-width:56ch}
+
+/* key box */
+#keybox{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:.75rem 1rem;margin:0 0 1rem}
+#keybox[open]{padding-bottom:1rem}
+#keybox summary{cursor:pointer;color:var(--text);font-weight:600;list-style:none;
+  display:flex;align-items:center;gap:.6rem}
+#keybox summary::-webkit-details-marker{display:none}
+#keybox summary::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--danger);
+  box-shadow:0 0 0 3px rgba(255,107,107,.18);flex:none}
+#keybox.set summary::before{background:var(--ok);box-shadow:0 0 0 3px rgba(100,224,163,.18)}
+#keybox.set summary::after{content:"key saved";color:var(--ok);font-weight:600;font-size:.8rem;
+  margin-left:auto;letter-spacing:.01em}
+#keybox .hint{margin:.65rem 0 0}
+#apikey{width:100%;margin-top:.7rem;padding:.6rem .7rem;font-size:.95rem;font-family:var(--mono);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text)}
+.hint{color:var(--muted);font-size:.9rem}
+
+/* language + romanize row */
+.setup{display:flex;gap:.7rem 1.5rem;flex-wrap:wrap;align-items:center;margin:0 0 1rem}
+.setup label{display:inline-flex;align-items:center;gap:.5rem;color:var(--muted);font-weight:600;font-size:.9rem}
+.setup select{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;
+  color:var(--text);padding:.45rem .55rem;font-size:.92rem;font-weight:600;font-family:var(--font-ui)}
+.setup input[type=checkbox]{accent-color:var(--accent);width:17px;height:17px}
+
+/* drop zone */
+#drop{border:2px dashed var(--line-2);border-radius:var(--radius);padding:clamp(2rem,6vw,3.4rem);
+  text-align:center;cursor:pointer;color:var(--muted);font-weight:600;font-size:1.05rem;
+  background:var(--surface);transition:border-color .15s,background .15s,color .15s}
+#drop:hover{border-color:var(--accent);color:var(--text)}
+#drop.over{border-color:var(--accent);background:rgba(255,226,61,.08);color:var(--text)}
+#drop svg{color:var(--faint);transition:color .15s}
+#drop:hover svg,#drop.over svg{color:var(--accent)}
+
+/* loader + status */
+#loader{display:flex;gap:.7rem;align-items:center;margin:1.2rem 0;padding:.85rem 1.1rem;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);font-weight:500}
+.spin{width:20px;height:20px;border:3px solid var(--surface-3);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .9s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-/* live preview */
-#pvwrap{position:relative;display:inline-block;max-width:100%;margin:.5rem 0;background:#000;border-radius:8px;overflow:hidden}
-/* the caption box: drag to move, side handles resize width, corner resizes text */
-/* free-transform caption: drag to move, corner/wheel to resize, pinch on touch */
+#status{color:var(--muted);margin:.8rem 0;min-height:1.2em}
+
+/* editor: sticky preview + transcript panel */
+.editor{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1.7rem;
+  margin-top:1.5rem;align-items:start}
+.stage{position:sticky;top:1rem}
+@media(max-width:860px){.editor{grid-template-columns:1fr;gap:1.3rem}.stage{position:static}}
+
+/* control toolbar */
+#ctlrow{display:flex;gap:.65rem 1.1rem;flex-wrap:wrap;align-items:center;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:.75rem .9rem;margin-bottom:.7rem}
+#ctlrow label{display:inline-flex;align-items:center;gap:.45rem;font-size:.82rem;
+  color:var(--muted);font-weight:600}
+#ctlrow select{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;
+  color:var(--text);padding:.4rem .5rem;font-size:.9rem;font-weight:600;font-family:var(--font-ui)}
+#gsizeval{min-width:3em;color:var(--muted)}
+input[type=range]{-webkit-appearance:none;appearance:none;width:116px;height:5px;border-radius:3px;
+  background:var(--surface-3);outline-offset:5px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--bg);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:17px;height:17px;border-radius:50%;background:var(--accent);
+  border:2px solid var(--bg);cursor:pointer}
+input[type=color]{inline-size:34px;block-size:28px;padding:0;border:1px solid var(--line);
+  border-radius:7px;background:var(--surface-2);cursor:pointer}
+
+/* buttons */
+button{font-family:var(--font-ui);font-weight:700;font-size:.95rem;cursor:pointer;border-radius:10px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--text);padding:.6rem 1rem;
+  min-height:40px;transition:background .15s,border-color .15s,transform .05s}
+button:hover{background:var(--surface-3);border-color:var(--line-2)}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.small{padding:.4rem .75rem;min-height:34px;font-size:.82rem;font-weight:600;color:var(--muted)}
+#burn{background:var(--accent);color:var(--accent-ink);border-color:var(--accent-2);
+  font-family:var(--font-display);font-weight:800;font-size:1.05rem;letter-spacing:-.01em;
+  width:100%;min-height:52px;border-radius:12px}
+#burn:hover{background:var(--accent-2)}
+
+/* preview */
+#pvwrap{position:relative;display:block;max-width:100%;background:#000;border-radius:var(--radius);
+  overflow:hidden;border:1px solid var(--line)}
+video{max-width:100%;max-height:72vh;display:block;width:100%}
+.note{color:var(--faint);font-size:.82rem;line-height:1.5;margin:.6rem 0 0}
+
+/* caption box (free transform) + 8 handles */
 #capbox{position:absolute;box-sizing:border-box;z-index:5;touch-action:none;cursor:grab;
   border:1px dashed transparent;border-radius:6px;transition:border-color .12s}
-#capbox:hover,#capbox.rzon{border-color:rgba(255,255,255,.6)}  /* show the grab zone */
+#capbox:hover,#capbox.rzon{border-color:rgba(255,255,255,.6)}
 #capbox.rzon{cursor:grabbing}
 #capbox.hidden{display:none!important}
 #overlay{pointer-events:none;line-height:1.15;text-align:center;padding:.1em .15em}
 #overlay .cap{display:inline-block;max-width:100%}
 #overlay span{white-space:pre-wrap}
-/* 8 resize handles: corners resize both, sides width, top/bottom text size */
-.rz{position:absolute;width:12px;height:12px;border-radius:3px;
-  background:rgba(255,255,255,.96);box-shadow:0 0 0 1px rgba(0,0,0,.45);
-  opacity:0;transition:opacity .12s;z-index:6;touch-action:none}
+.rz{position:absolute;width:12px;height:12px;border-radius:3px;background:#fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.5);opacity:0;transition:opacity .12s;z-index:6;touch-action:none}
 #capbox:hover .rz,#capbox.rzon .rz{opacity:1}
-@media(hover:none){.rz{opacity:.9}}  /* always visible on touch (no hover) */
+@media(hover:none){.rz{opacity:.9}}
 .rz.tl{left:-6px;top:-6px;cursor:nwse-resize}
 .rz.tr{right:-6px;top:-6px;cursor:nesw-resize}
 .rz.bl{left:-6px;bottom:-6px;cursor:nesw-resize}
@@ -46,77 +146,129 @@ select{padding:.4rem;font-size:1rem}
 .rz.mr{right:-6px;top:50%;margin-top:-6px;cursor:ew-resize}
 .rz.tc{top:-6px;left:50%;margin-left:-6px;cursor:ns-resize}
 .rz.bc{bottom:-6px;left:50%;margin-left:-6px;cursor:ns-resize}
-@media(prefers-reduced-motion:reduce){#overlay .pop{animation:none}}
 @keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
 #overlay .pop{animation:pop .22s ease-out}
-/* controls + per-word chips */
-#ctlrow{display:flex;gap:1rem;flex-wrap:wrap;align-items:center}
-#ctlrow select,#ctlrow input,#wordedit select,#wordedit input{padding:.3rem;font-size:1rem}
-#gsize,#wesize{width:5rem}
-.chips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.1rem 0 .6rem}
-.chip{padding:.15rem .5rem;font-size:.9rem;background:#eee;color:#333;border:1px solid #ddd;
-  border-radius:6px;cursor:pointer}
-.chip.styled{background:#fff3c4;border-color:#e0a800;font-weight:600}
-#wordedit{position:absolute;z-index:10;background:#fff;border:1px solid #bbb;border-radius:10px;
-  box-shadow:0 6px 24px rgba(0,0,0,.18);padding:.7rem .9rem;min-width:210px}
-#wordedit .we-row{margin:.35rem 0}
-button.small{padding:.3rem .7rem;font-size:.85rem}
-/* api key box */
-#keybox{margin:.5rem 0 1rem;border:1px solid #eee;border-radius:8px;padding:.6rem .8rem}
-#keybox summary{cursor:pointer;color:#444;font-weight:600}
-#keybox .hint{color:#777;font-size:.9rem;margin:.5rem 0}
-#apikey{width:100%;padding:.5rem;font-size:1rem;box-sizing:border-box;font-family:monospace}
-#keybox.set summary::after{content:" ✓ key saved";color:#1a8f3c;font-weight:400}
+@media(prefers-reduced-motion:reduce){#overlay .pop{animation:none}*{transition:none!important}}
+
+/* transcript panel */
+.panel-title{font-family:var(--font-display);font-weight:800;font-size:1.05rem;letter-spacing:-.01em;
+  margin:.1rem 0 .9rem;display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+.panel-title span{color:var(--faint);font-family:var(--font-ui);font-weight:600;font-size:.82rem}
+#segs{display:flex;flex-direction:column;gap:.75rem}
+.seg{display:flex;gap:.6rem;align-items:center}
+.seg small{color:var(--faint);width:4.4rem;flex:none;font-size:.72rem;text-align:right;
+  font-family:var(--mono);font-variant-numeric:tabular-nums}
+.seg input{flex:1;padding:.5rem .6rem;font-size:.95rem;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:8px;color:var(--text);font-family:var(--font-ui)}
+.seg input:focus{border-color:var(--line-2)}
+.chips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.05rem 0 .1rem 5rem}
+.chip{padding:.18rem .5rem;font-size:.82rem;background:var(--surface-2);color:var(--muted);
+  border:1px solid var(--line);border-radius:7px;cursor:pointer;font-weight:600}
+.chip:hover{border-color:var(--line-2);color:var(--text)}
+.chip.styled{background:rgba(255,226,61,.15);border-color:var(--accent);color:var(--accent)}
+.burnbar{margin-top:1.4rem;display:flex;flex-direction:column;gap:.9rem;
+  padding-top:1.1rem;border-top:1px solid var(--line)}
+.srt{display:inline-flex;align-items:center;gap:.5rem;color:var(--muted);font-size:.9rem;font-weight:600;cursor:pointer}
+.srt input{accent-color:var(--accent);width:17px;height:17px}
+
+/* word editor popover */
+#wordedit{position:absolute;z-index:20;background:var(--surface-2);border:1px solid var(--line-2);
+  border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.55);padding:.8rem .95rem;min-width:224px}
+#wordedit .we-row{margin:.4rem 0;color:var(--muted);font-size:.85rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+#wordedit b{color:var(--text)}
+#wordedit #weword{color:var(--accent);font-weight:700}
+#wordedit select,#wordedit input{background:var(--surface);border:1px solid var(--line);
+  border-radius:7px;color:var(--text);padding:.35rem .45rem;font-size:.9rem;font-family:var(--font-ui)}
+#wesize{width:5rem}
+
+/* result */
+.resultcard{margin-top:1.9rem;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);padding:1.3rem}
+.resultcard h3{font-family:var(--font-display);font-weight:800;margin:.1rem 0 .95rem;font-size:1.25rem}
+.resultcard video{border-radius:var(--radius-sm);border:1px solid var(--line);max-height:60vh}
+.dlrow{display:flex;gap:.8rem;flex-wrap:wrap;margin-top:1.1rem}
+.dlrow a{display:inline-flex;align-items:center;gap:.4rem;background:var(--accent);color:var(--accent-ink);
+  font-weight:700;padding:.6rem 1.05rem;border-radius:10px}
+.dlrow a:hover{background:var(--accent-2);text-decoration:none}
+.dlrow a.ghost{background:var(--surface-2);color:var(--text);border:1px solid var(--line)}
+.dlrow a.ghost:hover{background:var(--surface-3)}
+
+.hidden{display:none!important}
 </style></head><body>
-<h1>Captioner</h1>
-<p>Drop a video. Review the Hinglish captions, preview the look, then burn them in.</p>
+<main class="wrap">
+  <header class="masthead">
+    <div class="brand">Captioner<b>.</b></div>
+    <p class="tagline">Local Hinglish caption studio</p>
+  </header>
 
-<details id="keybox">
-  <summary>⚙︎ Groq API key (required)</summary>
-  <p class="hint">Captions are made with Groq (whisper-large-v3 + LLM Hinglish cleanup) — runs in the cloud, so audio leaves your Mac. Get a <b>free</b> key (no card) at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> → API Keys. Stored only in this browser, sent only to Groq.</p>
-  <input id="apikey" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
-</details>
+  <section class="intro">
+    <h1 class="hero">Put <span class="hl">Hinglish</span> captions on your Reels, spelled the way people actually talk.</h1>
+    <p class="lede">Drop a clip, fix the lines, pick a look, and burn them in. It runs on your Mac — the video never leaves it; only the audio goes to Groq to transcribe.</p>
+  </section>
 
-<div id="drop">Drag a video here or click to choose
-  <input id="file" type="file" accept="video/*" class="hidden"></div>
+  <details id="keybox">
+    <summary>Groq API key</summary>
+    <p class="hint">Captions are made with Groq (whisper-large-v3, then an LLM that cleans the Hinglish). It runs in the cloud, so the audio leaves your Mac. Get a <b>free</b> key — no card — at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> → API Keys. It's stored only in this browser and sent only to Groq.</p>
+    <input id="apikey" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+  </details>
 
-<div id="loader" class="hidden"><div class="spin"></div><span id="loadtxt">Working…</span></div>
-<div id="status"></div>
-
-<div id="editor" class="hidden">
-  <p id="ctlrow">
-    <label>Style <select id="style"></select></label>
-    <label>Font <select id="gfont"></select></label>
-    <label>Text size <input id="gsize" type="range" min="24" max="300" step="2"> <span id="gsizeval" class="hint"></span></label>
-    <label>Highlight <input id="ghl" type="color" value="#ffe500"></label>
-    <button id="posreset" class="small" type="button" title="recenter caption box and restore its size">⤢ reset box</button>
-  </p>
-  <p class="hint" style="margin:.2rem 0 .4rem">Drag the caption to move it. Drag any handle to resize the box — corners resize freely, side handles change width, top/bottom change text size. Scroll or pinch also resize the text.</p>
-  <div id="pvwrap">
-    <video id="preview" controls playsinline></video>
-    <div id="capbox" class="hidden">
-      <div id="overlay"></div>
-      <span class="rz tl" data-w="1" data-h="1"></span>
-      <span class="rz tc" data-h="1"></span>
-      <span class="rz tr" data-w="1" data-h="1"></span>
-      <span class="rz ml" data-w="1"></span>
-      <span class="rz mr" data-w="1"></span>
-      <span class="rz bl" data-w="1" data-h="1"></span>
-      <span class="rz bc" data-h="1"></span>
-      <span class="rz br" data-w="1" data-h="1"></span>
-    </div>
+  <div class="setup">
+    <label>Language <select id="lang"></select></label>
   </div>
-  <p style="color:#777;margin:.2rem 0 1rem">↑ Live preview (approximate). The burned video is full quality.</p>
-  <div id="segs"></div>
-  <p><label><input id="srt" type="checkbox"> Also save .srt</label></p>
-  <button id="burn">Burn captions</button>
-</div>
 
-<div id="result" class="hidden">
-  <h3>Burned result</h3>
-  <video id="player" controls></video>
-  <p><a id="dl" download>Download video</a> <span id="srtwrap" class="hidden"> | <a id="srtdl" download>Download .srt</a></span></p>
-</div>
+  <div id="drop">
+    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin:0 auto .7rem;display:block">
+      <path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
+    </svg>
+    Drag a video here, or click to choose
+    <input id="file" type="file" accept="video/*" class="hidden">
+  </div>
+
+  <div id="loader" class="hidden"><div class="spin"></div><span id="loadtxt">Working…</span></div>
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <section id="editor" class="hidden editor">
+    <div class="stage">
+      <div id="ctlrow">
+        <label>Style <select id="style"></select></label>
+        <label>Font <select id="gfont"></select></label>
+        <label>Size <input id="gsize" type="range" min="24" max="300" step="2"> <span id="gsizeval" class="hint"></span></label>
+        <label>Highlight <input id="ghl" type="color" value="#ffe500"></label>
+        <button id="posreset" class="small" type="button" title="recenter the caption box and restore its size">Reset box</button>
+      </div>
+      <div id="pvwrap">
+        <video id="preview" controls playsinline></video>
+        <div id="capbox" class="hidden">
+          <div id="overlay"></div>
+          <span class="rz tl" data-w="1" data-h="1"></span>
+          <span class="rz tc" data-h="1"></span>
+          <span class="rz tr" data-w="1" data-h="1"></span>
+          <span class="rz ml" data-w="1"></span>
+          <span class="rz mr" data-w="1"></span>
+          <span class="rz bl" data-w="1" data-h="1"></span>
+          <span class="rz bc" data-h="1"></span>
+          <span class="rz br" data-w="1" data-h="1"></span>
+        </div>
+      </div>
+      <p class="note">Live preview (approximate) — the burned video is full quality. Drag the caption to move it; drag a handle to resize. Corners resize freely, side handles change width, top and bottom change text size. Scroll or pinch to resize the text.</p>
+    </div>
+
+    <div class="work">
+      <h2 class="panel-title">Transcript <span>edit any line, then burn</span></h2>
+      <div id="segs"></div>
+      <div class="burnbar">
+        <label class="srt"><input id="srt" type="checkbox"> Also save a .srt file</label>
+        <button id="burn">Burn captions in</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="result" class="hidden resultcard">
+    <h3>Your captioned video</h3>
+    <video id="player" controls></video>
+    <div class="dlrow"><a id="dl" download>Download video</a><span id="srtwrap" class="hidden"><a id="srtdl" class="ghost" download>Download .srt</a></span></div>
+  </section>
+</main>
 
 <div id="wordedit" class="hidden">
   <div class="we-row"><b>Word:</b> <span id="weword"></span></div>
@@ -174,6 +326,13 @@ function fontStack(name){
 fetch("/styles").then(r=>r.json()).then(d=>{
   d.presets.forEach(p=>STYLES[p.name]=p);
   $("style").innerHTML=d.presets.map(p=>`<option value="${p.name}">${prettyStyle(p.name)}</option>`).join("");
+  // language picker: each option carries its whisper code + romanize flag
+  const langs=d.languages||[];
+  $("lang").innerHTML=langs.map(l=>
+    `<option value="${l.id}" data-code="${l.code}" data-rom="${l.romanize?1:0}">${l.label}</option>`).join("");
+  let saved="hinglish";try{saved=localStorage.getItem("capLang")||"hinglish";}catch(e){}
+  if([...$("lang").options].some(o=>o.value===saved))$("lang").value=saved;
+  $("lang").onchange=()=>{try{localStorage.setItem("capLang",$("lang").value);}catch(e){}};
 }).catch(()=>{});
 $("style").onchange=()=>{applyOverlayStyle();renderCaption();};
 
@@ -316,6 +475,9 @@ function upload(file){
   showLoader("Uploading video… 0% of "+mb+" MB");
   // XHR, not fetch: fetch can't report upload progress for a big file
   const fd=new FormData();fd.append("video",file);fd.append("api_key",key);
+  const lo=$("lang").selectedOptions[0];
+  fd.append("language",lo?lo.dataset.code:"hi");
+  fd.append("romanize",(lo&&lo.dataset.rom==="1")?"true":"false");
   const xhr=new XMLHttpRequest();
   xhr.open("POST","/process");
   xhr.upload.onprogress=e=>{
