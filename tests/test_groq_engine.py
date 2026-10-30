@@ -68,3 +68,25 @@ def test_api_error_surfaces(monkeypatch, tmp_path):
     wav = tmp_path / "a.wav"; wav.write_bytes(b"x")
     with pytest.raises(groq_engine.GroqError):
         groq_engine.transcribe_and_romanize(str(wav), "gsk_bad")
+
+
+def test_long_audio_is_chunked_with_offsets(monkeypatch, tmp_path):
+    chunk_payload = {
+        "language": "hi",
+        "segments": [{"text": "line one", "start": 0.0, "end": 1.0}],
+        "words": [{"word": "line", "start": 0.0, "end": 0.5},
+                  {"word": "one", "start": 0.5, "end": 1.0}],
+    }
+    monkeypatch.setattr(groq_engine, "_probe_duration", lambda p: 1300.0)  # > CHUNK_SECS
+    monkeypatch.setattr(groq_engine, "_split",
+                        lambda p, s: ("/tmp/nope", [(0, "c0"), (groq_engine.CHUNK_SECS, "c1")]))
+    monkeypatch.setattr(groq_engine.shutil, "rmtree", lambda *a, **k: None)
+    seen = []
+    monkeypatch.setattr(groq_engine, "_transcribe",
+                        lambda path, key: seen.append(path) or chunk_payload)
+    monkeypatch.setattr(groq_engine, "_cleanup", lambda text, key: "cleaned")
+    t = groq_engine.transcribe_and_romanize(str(tmp_path / "a.flac"), "gsk_test")
+    assert seen == ["c0", "c1"]                       # both chunks transcribed
+    assert len(t.segments) == 2
+    assert t.segments[1].start == groq_engine.CHUNK_SECS        # 2nd chunk offset applied
+    assert t.segments[1].words[0].start == groq_engine.CHUNK_SECS

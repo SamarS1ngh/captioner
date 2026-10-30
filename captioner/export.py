@@ -26,9 +26,14 @@ def _ffprobe() -> str:
     return _resolve("CAPTIONER_FFPROBE", "ffprobe")
 
 
-def extract_audio(video_path: str, out_wav: str) -> None:
-    """Extract 16 kHz mono WAV audio from a video file."""
-    cmd = [_ffmpeg(), "-y", "-i", video_path, "-vn", "-ar", "16000", "-ac", "1", out_wav]
+def extract_audio(video_path: str, out_path: str) -> None:
+    """Extract 16 kHz mono FLAC audio from a video file.
+
+    FLAC (lossless, ~1/3 the size of WAV) keeps the upload under Groq's
+    request size cap for far longer clips; whisper only needs 16 kHz mono.
+    """
+    cmd = [_ffmpeg(), "-y", "-i", video_path, "-vn",
+           "-ar", "16000", "-ac", "1", "-c:a", "flac", out_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(

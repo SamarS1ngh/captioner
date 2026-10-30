@@ -24,10 +24,10 @@ def process_video(video_path: str, api_key: str | None = None) -> Transcript:
             "A Groq API key is required. Get a free one at console.groq.com "
             "and paste it in the app."
         )
-    fd, wav_path = tempfile.mkstemp(suffix=".wav")
+    fd, audio_path = tempfile.mkstemp(suffix=".flac")
     os.close(fd)
     try:
-        extract_audio(video_path, wav_path)
-        return groq_engine.transcribe_and_romanize(wav_path, key)
+        extract_audio(video_path, audio_path)
+        return groq_engine.transcribe_and_romanize(audio_path, key)
     finally:
-        os.remove(wav_path)
+        os.remove(audio_path)
