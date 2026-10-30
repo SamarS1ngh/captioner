@@ -23,14 +23,21 @@ select{padding:.4rem;font-size:1rem}
 /* live preview */
 #pvwrap{position:relative;display:inline-block;max-width:100%;margin:.5rem 0;background:#000;border-radius:8px;overflow:hidden}
 /* the caption box: drag to move, side handles resize width, corner resizes text */
-/* free-transform caption: grab to drag, two-finger pinch to scale/rotate */
+/* free-transform caption: drag to move, corner/wheel to resize, pinch on touch */
 #capbox{position:absolute;box-sizing:border-box;z-index:5;touch-action:none;cursor:grab;
-  border:1px dashed transparent;border-radius:6px}
-#capbox.rzon{cursor:grabbing;border-color:rgba(255,255,255,.5)}  /* only while moving */
+  border:1px dashed transparent;border-radius:6px;transition:border-color .12s}
+#capbox:hover,#capbox.rzon{border-color:rgba(255,255,255,.6)}  /* show the grab zone */
+#capbox.rzon{cursor:grabbing}
 #capbox.hidden{display:none!important}
 #overlay{pointer-events:none;line-height:1.15;text-align:center;padding:.1em .15em}
 #overlay .cap{display:inline-block;max-width:100%}
 #overlay span{white-space:pre-wrap}
+/* one small corner grip for mouse users (touch resizes by pinch instead) */
+.rz{position:absolute;right:1px;bottom:1px;width:13px;height:13px;border-radius:50%;
+  background:rgba(255,255,255,.95);box-shadow:0 0 0 1px rgba(0,0,0,.45);
+  opacity:0;transition:opacity .12s;cursor:nwse-resize;z-index:6}
+#capbox:hover .rz,#capbox.rzon .rz{opacity:1}
+@media(hover:none){.rz{display:none}}
 @media(prefers-reduced-motion:reduce){#overlay .pop{animation:none}}
 @keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
 #overlay .pop{animation:pop .22s ease-out}
@@ -72,15 +79,16 @@ button.small{padding:.3rem .7rem;font-size:.85rem}
   <p id="ctlrow">
     <label>Style <select id="style"></select></label>
     <label>Font <select id="gfont"></select></label>
-    <label>Text size <input id="gsize" type="range" min="24" max="220" step="2"> <span id="gsizeval" class="hint"></span></label>
+    <label>Text size <input id="gsize" type="range" min="24" max="300" step="2"> <span id="gsizeval" class="hint"></span></label>
     <label>Highlight <input id="ghl" type="color" value="#ffe500"></label>
     <button id="posreset" class="small" type="button" title="recenter caption box and restore its size">⤢ reset box</button>
   </p>
-  <p class="hint" style="margin:.2rem 0 .4rem">Drag the caption to move it. Pinch to resize and rotate (two-finger on a trackpad/phone), or use the text-size slider.</p>
+  <p class="hint" style="margin:.2rem 0 .4rem">Drag the caption to move it; drag the corner dot or scroll over it to resize. On a trackpad or phone, pinch to resize and rotate.</p>
   <div id="pvwrap">
     <video id="preview" controls playsinline></video>
     <div id="capbox" class="hidden">
       <div id="overlay"></div>
+      <span class="rz" title="drag to resize text"></span>
     </div>
   </div>
   <p style="color:#777;margin:.2rem 0 1rem">↑ Live preview (approximate). The burned video is full quality.</p>
@@ -189,44 +197,46 @@ const ptX=e=>e.touches?e.touches[0].clientX:e.clientX;
 const ptY=e=>e.touches?e.touches[0].clientY:e.clientY;
 const tDist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
 const tAng =t=>Math.atan2(t[1].clientY-t[0].clientY,t[1].clientX-t[0].clientX)*180/Math.PI;
+const curSize=()=>effSize(STYLES[$("style").value]||{});
 function startMove(){const r=pv.getBoundingClientRect();
-  drag={pw:r.width||1,ph:r.height||1,top:r.top,left:r.left};$("capbox").classList.add("rzon");}
-function moveBox(e){if(!drag)return;
+  drag={mode:"move",pw:r.width||1,ph:r.height||1,top:r.top,left:r.left};
+  $("capbox").classList.add("rzon");}
+function startResize(e){drag={mode:"size",y:ptY(e),size:curSize()};$("capbox").classList.add("rzon");}
+function moveBox(e){
   gpos.x=clamp((ptX(e)-drag.left)/drag.pw,0,1);
   gpos.y=clamp((ptY(e)-drag.top)/drag.ph,0,1);positionBox();}
-function scaleBy(factor){
-  sizeOverride=clamp(Math.round((pinch?pinch.size:effSize(STYLES[$("style").value]||{}))*factor),24,300);
+function setSize(px){sizeOverride=clamp(Math.round(px),24,300);
   syncSizeUI();applyOverlayStyle();renderCaption();}
 function endGesture(){drag=null;pinch=null;$("capbox").classList.remove("rzon");}
 (function wireBox(){
-  const cb=$("capbox");
-  // mouse: drag anywhere to move
-  cb.addEventListener("mousedown",e=>{if(e.button===0){startMove();e.preventDefault();}});
-  document.addEventListener("mousemove",e=>{if(drag)moveBox(e);});
+  const cb=$("capbox"), grip=cb.querySelector(".rz");
+  // mouse: corner grip resizes text, body drags to move
+  grip.addEventListener("mousedown",e=>{startResize(e);e.stopPropagation();e.preventDefault();});
+  cb.addEventListener("mousedown",e=>{if(e.button===0&&e.target!==grip){startMove();e.preventDefault();}});
+  document.addEventListener("mousemove",e=>{if(!drag)return;
+    if(drag.mode==="move")moveBox(e);
+    else setSize(drag.size+(e.clientY-drag.y)/scale);});   // drag grip down = bigger
   document.addEventListener("mouseup",endGesture);
+  // mouse wheel / trackpad pinch over the box resizes text
+  cb.addEventListener("wheel",e=>{e.preventDefault();pinch=null;
+    setSize(curSize()-e.deltaY*(e.ctrlKey?0.6:0.3));},{passive:false});
   // touch: one finger moves, two fingers pinch-scale + rotate
   cb.addEventListener("touchstart",e=>{
     if(e.touches.length>=2){
-      pinch={d:tDist(e.touches)||1,a:tAng(e.touches),
-             size:effSize(STYLES[$("style").value]||{}),rot:rot};
+      pinch={d:tDist(e.touches)||1,a:tAng(e.touches),size:curSize(),rot:rot};
       drag=null;$("capbox").classList.add("rzon");
     }else{startMove();}
     e.preventDefault();
   },{passive:false});
   cb.addEventListener("touchmove",e=>{
     if(pinch&&e.touches.length>=2){
-      scaleBy(tDist(e.touches)/pinch.d);
+      setSize(pinch.size*(tDist(e.touches)/pinch.d));
       rot=pinch.rot+(tAng(e.touches)-pinch.a);positionBox();
     }else if(drag){moveBox(e);}
     e.preventDefault();
   },{passive:false});
   cb.addEventListener("touchend",endGesture);
   cb.addEventListener("touchcancel",endGesture);
-  // trackpad pinch = ctrl+wheel -> scale text
-  cb.addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();
-    pinch=null;
-    sizeOverride=clamp(Math.round(effSize(STYLES[$("style").value]||{})-e.deltaY*0.6),24,300);
-    syncSizeUI();applyOverlayStyle();renderCaption();},{passive:false});
 })();
 $("posreset").onclick=()=>{gpos={x:null,y:null};rot=0;sizeOverride=null;lastCapKey=null;
   syncSizeUI();applyOverlayStyle();renderCaption();};
