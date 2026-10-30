@@ -1,5 +1,6 @@
 fastapi==0.128.8
 uvicorn
+h11
 python-multipart
 requests
 pytest

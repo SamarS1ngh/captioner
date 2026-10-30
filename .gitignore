@@ -13,3 +13,9 @@ output/
 !tests/fixtures/*.wav
 # vendored static libass-enabled ffmpeg/ffprobe (fetched by run.sh, not committed)
 vendor/
+
+# packaging
+bin/
+build/
+dist/
+*.app

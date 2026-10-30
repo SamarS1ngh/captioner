@@ -1,0 +1,61 @@
+name: Build desktop apps
+
+# Builds the double-click app for macOS (Apple Silicon), Windows, and Linux.
+# Run it by hand from the Actions tab (workflow_dispatch), or push a v* tag to
+# also attach the zips to a GitHub Release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # Apple Silicon runner
+            label: macos-arm64
+          - os: windows-latest
+            label: windows-x64
+          - os: ubuntu-latest
+            label: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Fetch ffmpeg
+        run: python scripts/fetch_ffmpeg.py
+
+      - name: Build
+        run: pyinstaller --noconfirm captioner.spec
+
+      - name: Package (zip)
+        shell: bash
+        run: |
+          cd dist
+          if [ -d "Captioner.app" ]; then
+            ditto -c -k --keepParent "Captioner.app" "../Captioner-${{ matrix.label }}.zip"
+          elif command -v 7z >/dev/null 2>&1; then
+            7z a -tzip "../Captioner-${{ matrix.label }}.zip" "Captioner" >/dev/null
+          else
+            zip -r "../Captioner-${{ matrix.label }}.zip" "Captioner"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Captioner-${{ matrix.label }}
+          path: Captioner-${{ matrix.label }}.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Captioner-${{ matrix.label }}.zip
