@@ -158,3 +158,10 @@ def test_box_width_sets_left_right_margins():
     out = build_ass(_one_seg_transcript(), replace(get_style("karaoke"), margin_l=200, margin_r=200))
     f = next(l for l in out.splitlines() if l.startswith("Style:")).split(",")
     assert f[19] == "200" and f[20] == "200"  # MarginL, MarginR
+
+
+def test_angle_rotates_the_style():
+    from dataclasses import replace
+    out = build_ass(_one_seg_transcript(), replace(get_style("karaoke"), angle=30.0))
+    f = next(l for l in out.splitlines() if l.startswith("Style:")).split(",")
+    assert f[14] == "30.0"  # Angle column (ASS z-rotation)

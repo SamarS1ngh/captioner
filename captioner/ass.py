@@ -40,6 +40,7 @@ class AssStyle:
     margin_v: int = 260
     margin_l: int = 60  # left box margin (box width = PlayResX - l - r)
     margin_r: int = 60  # right box margin
+    angle: float = 0.0  # z-rotation in degrees (ASS: counter-clockwise)
     alignment: int = 2  # 2 = bottom-centre, 5 = screen centre
     uppercase: bool = False
     palette: tuple = ()  # mrbeast per-word colour cycle
@@ -285,7 +286,7 @@ def build_ass(t: Transcript, style: AssStyle = AssStyle()) -> str:
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{style.font_name},{style.font_size},"
         f"{style.highlight_color},{style.primary_color},{style.outline_color},"
-        f"{style.back_color},{-1 if style.bold else 0},0,0,0,100,100,0,0,"
+        f"{style.back_color},{-1 if style.bold else 0},0,0,0,100,100,0,{style.angle},"
         f"{style.border_style},{style.outline},{style.shadow},"
         f"{style.alignment},{style.margin_l},{style.margin_r},{style.margin_v},1\n\n"
         "[Events]\n"
