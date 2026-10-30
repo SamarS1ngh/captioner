@@ -44,7 +44,9 @@ def main() -> None:
             continue
         url = f"{BASE}/{os_part}/{arch}/release/{tool}.zip"
         print(f"  fetch {url}")
-        data = urllib.request.urlopen(url, timeout=180).read()  # noqa: S310 (trusted host)
+        # Default urllib UA is 403'd by the CDN; send a browser-like UA.
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (captioner-build)"})
+        data = urllib.request.urlopen(req, timeout=180).read()  # noqa: S310 (trusted host)
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             member = next(
                 n for n in z.namelist()
