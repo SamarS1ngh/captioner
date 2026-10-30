@@ -18,4 +18,14 @@ def test_transcript_roundtrips_through_dict():
 
 def test_segment_dict_keys():
     seg = Segment(text="x", start=0.0, end=1.0, words=[Word(text="x", start=0.0, end=1.0)])
-    assert set(seg.to_dict().keys()) == {"text", "start", "end", "words"}
+    assert set(seg.to_dict().keys()) == {"text", "start", "end", "words", "word_styles"}
+
+
+def test_word_styles_roundtrip_with_string_keys():
+    seg = Segment(text="a b", start=0.0, end=1.0,
+                  words=[Word("a", 0.0, 0.5), Word("b", 0.5, 1.0)],
+                  word_styles={1: {"font": "Impact", "size": 90}})
+    # simulate the JSON trip: keys become strings, from_dict coerces back to int
+    d = seg.to_dict()
+    d["word_styles"] = {"1": {"font": "Impact", "size": 90}}
+    assert Segment.from_dict(d).word_styles == {1: {"font": "Impact", "size": 90}}

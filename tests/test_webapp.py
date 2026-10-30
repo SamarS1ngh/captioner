@@ -58,8 +58,8 @@ def test_styles_endpoint_lists_presets_with_fields():
     assert r.status_code == 200
     presets = r.json()["presets"]
     names = [p["name"] for p in presets]
-    assert "classic" in names and "bold_pop" in names
-    classic = next(p for p in presets if p["name"] == "classic")
+    assert "karaoke" in names and "hormozi" in names
+    classic = next(p for p in presets if p["name"] == "karaoke")
     # fields the preview needs to render faithfully
     for key in ("font_name", "font_size", "primary_color",
                 "highlight_color", "outline", "border_style", "margin_v"):
@@ -80,10 +80,10 @@ def test_export_applies_chosen_preset(tmp_path, monkeypatch):
     segments = [{"text": "hello", "start": 0.0, "end": 1.0,
                  "words": [{"text": "hello", "start": 0.0, "end": 1.0}]}]
     r = client.post("/export", json={
-        "job": "stub2", "segments": segments, "preset": "bold_pop",
+        "job": "stub2", "segments": segments, "preset": "mrbeast",
     })
     assert r.status_code == 200
-    # the bold_pop preset's font must drive the burned ASS
+    # the mrbeast preset font must drive the burned ASS
     assert "Arial Black" in captured["ass"]
 
 
@@ -98,7 +98,7 @@ def test_export_override_on_top_of_preset(tmp_path, monkeypatch):
     segments = [{"text": "hi", "start": 0.0, "end": 1.0,
                  "words": [{"text": "hi", "start": 0.0, "end": 1.0}]}]
     r = client.post("/export", json={
-        "job": "stub3", "segments": segments, "preset": "bold_pop",
+        "job": "stub3", "segments": segments, "preset": "mrbeast",
         "style": {"font_size": 120},
     })
     assert r.status_code == 200

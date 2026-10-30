@@ -22,10 +22,24 @@ select{padding:.4rem;font-size:1rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* live preview */
 #pvwrap{position:relative;display:inline-block;max-width:100%;margin:.5rem 0;background:#000;border-radius:8px;overflow:hidden}
-#overlay{position:absolute;left:0;right:0;bottom:0;text-align:center;pointer-events:none;
-  padding:0 4%;box-sizing:border-box;line-height:1.15}
+#overlay{position:absolute;inset:0;display:flex;justify-content:center;
+  pointer-events:none;padding:0 4%;box-sizing:border-box;line-height:1.15;text-align:center}
 #overlay .cap{display:inline-block;max-width:100%}
 #overlay span{white-space:pre-wrap}
+@keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
+#overlay .pop{animation:pop .22s ease-out}
+/* controls + per-word chips */
+#ctlrow{display:flex;gap:1rem;flex-wrap:wrap;align-items:center}
+#ctlrow select,#ctlrow input,#wordedit select,#wordedit input{padding:.3rem;font-size:1rem}
+#gsize,#wesize{width:5rem}
+.chips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.1rem 0 .6rem}
+.chip{padding:.15rem .5rem;font-size:.9rem;background:#eee;color:#333;border:1px solid #ddd;
+  border-radius:6px;cursor:pointer}
+.chip.styled{background:#fff3c4;border-color:#e0a800;font-weight:600}
+#wordedit{position:absolute;z-index:10;background:#fff;border:1px solid #bbb;border-radius:10px;
+  box-shadow:0 6px 24px rgba(0,0,0,.18);padding:.7rem .9rem;min-width:210px}
+#wordedit .we-row{margin:.35rem 0}
+button.small{padding:.3rem .7rem;font-size:.85rem}
 /* api key box */
 #keybox{margin:.5rem 0 1rem;border:1px solid #eee;border-radius:8px;padding:.6rem .8rem}
 #keybox summary{cursor:pointer;color:#444;font-weight:600}
@@ -49,7 +63,11 @@ select{padding:.4rem;font-size:1rem}
 <div id="status"></div>
 
 <div id="editor" class="hidden">
-  <p><label>Caption style: <select id="style"></select></label></p>
+  <p id="ctlrow">
+    <label>Style <select id="style"></select></label>
+    <label>Font <select id="gfont"></select></label>
+    <label>Size <input id="gsize" type="number" min="20" max="220" step="2" placeholder="auto"></label>
+  </p>
   <div id="pvwrap">
     <video id="preview" controls playsinline></video>
     <div id="overlay"></div>
@@ -66,8 +84,17 @@ select{padding:.4rem;font-size:1rem}
   <p><a id="dl" download>Download video</a> <span id="srtwrap" class="hidden"> | <a id="srtdl" download>Download .srt</a></span></p>
 </div>
 
+<div id="wordedit" class="hidden">
+  <div class="we-row"><b>Word:</b> <span id="weword"></span></div>
+  <div class="we-row"><label>Font <select id="wefont"></select></label></div>
+  <div class="we-row"><label>Size <input id="wesize" type="number" min="20" max="240" step="2" placeholder="auto"></label></div>
+  <div class="we-row"><button id="weclear" class="small">reset word</button> <button id="weclose" class="small">done</button></div>
+</div>
+
 <script>
 const $=id=>document.getElementById(id);
+const FONTS=["Arial","Arial Black","Helvetica","Impact","Verdana","Georgia",
+  "Times New Roman","Courier New","Consolas","Trebuchet MS","Comic Sans MS"];
 let job=null, segments=[], videoURL=null;
 let STYLES={}, scale=1;
 const status=t=>$("status").textContent=t;
@@ -115,6 +142,41 @@ fetch("/styles").then(r=>r.json()).then(d=>{
   $("style").innerHTML=d.presets.map(p=>`<option value="${p.name}">${prettyStyle(p.name)}</option>`).join("");
 }).catch(()=>{});
 $("style").onchange=()=>{applyOverlayStyle();renderCaption();};
+
+// font dropdowns (global + per-word); "" = use the style's own font
+const fontOpts='<option value="">(style default)</option>'+FONTS.map(f=>`<option value="${f}">${f}</option>`).join("");
+$("gfont").innerHTML=fontOpts; $("wefont").innerHTML=fontOpts;
+$("gfont").onchange=()=>{applyOverlayStyle();renderCaption();};
+$("gsize").oninput=()=>{applyOverlayStyle();renderCaption();};
+const effFont=st=>$("gfont").value||st.font_name;
+const effSize=st=>parseInt($("gsize").value)||st.font_size;
+
+// --- per-word style editor (floating panel) ---
+let weSeg=-1, weTok=-1;
+function openWordEdit(si,ti,chip){
+  weSeg=si; weTok=ti;
+  const ov=(segments[si].word_styles||{})[ti]||{};
+  $("weword").textContent=(segments[si].text.trim().split(/\s+/)[ti]||"");
+  $("wefont").value=ov.font||""; $("wesize").value=ov.size||"";
+  const r=chip.getBoundingClientRect();
+  const we=$("wordedit"); we.classList.remove("hidden");
+  we.style.left=(window.scrollX+Math.min(r.left,window.innerWidth-240))+"px";
+  we.style.top=(window.scrollY+r.bottom+6)+"px";
+}
+function saveWordEdit(){
+  if(weSeg<0)return;
+  const ws=segments[weSeg].word_styles=segments[weSeg].word_styles||{};
+  const font=$("wefont").value, size=parseInt($("wesize").value);
+  const ov={}; if(font)ov.font=font; if(size)ov.size=size;
+  if(Object.keys(ov).length)ws[weTok]=ov; else delete ws[weTok];
+  buildSegEditor(); lastCapKey=null; renderCaption();
+  // keep panel anchored to the same (re-rendered) chip
+  const chip=document.querySelector(`.chip[data-si="${weSeg}"][data-ti="${weTok}"]`);
+  if(chip)openWordEdit(weSeg,weTok,chip);
+}
+$("wefont").onchange=saveWordEdit; $("wesize").oninput=saveWordEdit;
+$("weclear").onclick=()=>{$("wefont").value="";$("wesize").value="";saveWordEdit();};
+$("weclose").onclick=()=>{$("wordedit").classList.add("hidden");weSeg=-1;};
 
 $("drop").onclick=()=>$("file").click();
 $("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("over")};
@@ -165,14 +227,33 @@ function upload(file){
   xhr.send(fd);
 }
 
+function renderChips(i,chipsEl){
+  chipsEl.innerHTML="";
+  const s=segments[i];
+  s.text.trim().split(/\s+/).filter(Boolean).forEach((tok,ti)=>{
+    const c=document.createElement("button");c.type="button";c.className="chip";
+    c.textContent=tok;c.dataset.si=i;c.dataset.ti=ti;
+    if((s.word_styles||{})[ti])c.classList.add("styled");
+    c.onclick=()=>openWordEdit(i,ti,c);
+    chipsEl.append(c);
+  });
+}
 function buildSegEditor(){
   const box=$("segs");box.innerHTML="";
   segments.forEach((s,i)=>{
+    s.word_styles=s.word_styles||{};
+    const wrap=document.createElement("div");
     const row=document.createElement("div");row.className="seg";
     const t=document.createElement("small");t.textContent=s.start.toFixed(1)+"-"+s.end.toFixed(1)+"s";
     const inp=document.createElement("input");inp.value=s.text;
-    inp.oninput=()=>{segments[i].text=inp.value;renderCaption();};
-    row.append(t,inp);box.append(row);
+    const chips=document.createElement("div");chips.className="chips";
+    inp.oninput=()=>{segments[i].text=inp.value;
+      const n=inp.value.trim().split(/\s+/).filter(Boolean).length;
+      Object.keys(segments[i].word_styles).forEach(k=>{if(+k>=n)delete segments[i].word_styles[k];});
+      lastCapKey=null;renderCaption();};
+    inp.onchange=()=>renderChips(i,chips);   // refresh chips once edit settles
+    row.append(t,inp);renderChips(i,chips);
+    wrap.append(row,chips);box.append(wrap);
   });
 }
 
@@ -188,45 +269,97 @@ pv.addEventListener("timeupdate",renderCaption);
 
 function applyOverlayStyle(){
   const st=STYLES[$("style").value];if(!st)return;
+  lastCapKey=null;  // force a rebuild after a style/size change
   computeScale();
   const o=$("overlay");
-  o.style.fontFamily=fontStack(st.font_name);
+  o.style.fontFamily=fontStack(effFont(st));
   o.style.fontWeight=st.bold?"900":"400";
-  o.style.fontSize=(st.font_size*scale)+"px";
-  o.style.paddingBottom=(st.margin_v*scale)+"px";
+  o.style.fontSize=(effSize(st)*scale)+"px";
+  // centre-screen styles (alignment 5) sit in the middle; others at the bottom
+  const centred=st.alignment===5;
+  o.style.alignItems=centred?"center":"flex-end";
+  o.style.paddingBottom=centred?"0":(st.margin_v*scale)+"px";
   const stroke=Math.max(1,st.outline*scale);
-  // outline via text-stroke (behind the fill) + soft shadow for depth
   o.style.webkitTextStrokeWidth=stroke+"px";
   o.style.webkitTextStrokeColor=assColor(st.outline_color);
   o.style.paintOrder="stroke fill";
   o.style.textShadow=`0 ${Math.max(1,st.shadow*scale)}px ${2*scale}px rgba(0,0,0,.5)`;
 }
 
+function _phraseGroups(toks){
+  const groups=[]; let cur=[], i0=0;
+  toks.forEach((tk,i)=>{cur.push(tk);
+    if(cur.length>=4 || /[.,!?।]$/.test(tk)){groups.push({i0,i1:i,toks:cur});cur=[];i0=i+1;}});
+  if(cur.length)groups.push({i0,i1:toks.length-1,toks:cur});
+  return groups;
+}
+
+function markerBg(assc){return assColor(assc).replace(/,[^,]+\)$/,",0.4)");}
+
+let lastCapKey=null;
 function renderCaption(){
-  const o=$("overlay");o.innerHTML="";
+  const o=$("overlay");
   const st=STYLES[$("style").value];if(!st)return;
   const t=pv.currentTime;
   const seg=segments.find(s=>t>=s.start && t<s.end);
-  if(!seg)return;
+  if(!seg){o.innerHTML="";lastCapKey=null;return;}
   const toks=(seg.text||"").trim().split(/\s+/).filter(Boolean);
-  if(!toks.length)return;
-  // per-token start time: use word timestamps when counts match, else even split
+  if(!toks.length){o.innerHTML="";lastCapKey=null;return;}
   let times;
   if(seg.words && seg.words.length===toks.length){times=seg.words.map(w=>w.start);}
   else{const d=(seg.end-seg.start)/toks.length;times=toks.map((_,i)=>seg.start+i*d);}
+  const kind=st.kind||"karaoke";
+  const active=times.reduce((a,tv,i)=>t>=tv?i:a,-1); // last spoken token index
+  const capKey=$("style").value+":"+kind+":"+active;
+  if(capKey===lastCapKey && o.firstChild)return;  // rebuild only on word change
+  lastCapKey=capKey;
+  o.innerHTML="";
   const rest=assColor(st.primary_color), hi=assColor(st.highlight_color);
+  const ws=seg.word_styles||{};
+  const up=s=>st.uppercase?s.toUpperCase():s;
   const cap=document.createElement("div");cap.className="cap";
-  if(st.border_style===3){
-    cap.style.background=assColor(st.back_color);
-    cap.style.padding=(st.font_size*0.12*scale)+"px "+(st.font_size*0.3*scale)+"px";
-    cap.style.borderRadius=(6*scale)+"px";
-  }
-  toks.forEach((tok,i)=>{
+  const ai=Math.max(active,0);
+  // one <span> per token so per-word font/size overrides apply everywhere
+  function span(i,color,deco){
     const sp=document.createElement("span");
-    sp.textContent=tok+(i<toks.length-1?" ":"");
-    sp.style.color=(t>=times[i])?hi:rest;  // karaoke: fills as it's spoken
+    sp.textContent=up(toks[i])+" ";
+    if(color)sp.style.color=color;
+    const ov=ws[i];
+    if(ov){if(ov.font)sp.style.fontFamily=fontStack(ov.font);
+      if(ov.size)sp.style.fontSize=(ov.size*scale)+"px";}
+    if(deco==="marker"){sp.style.background=markerBg(st.highlight_color);
+      sp.style.borderRadius=".14em";sp.style.padding="0 .08em";}
+    if(deco==="box"){sp.style.background=assColor(st.highlight_color);sp.style.color="#000";
+      sp.style.webkitTextStrokeWidth="0";sp.style.borderRadius=".14em";sp.style.padding="0 .12em";}
     cap.append(sp);
-  });
+  }
+  if(kind==="karaoke"||kind==="boxed"){
+    toks.forEach((_,i)=>span(i,i<=active?hi:rest));
+    if(kind==="boxed"){cap.style.background=assColor(st.back_color);
+      cap.style.padding=".1em .35em";cap.style.borderRadius=".12em";}
+  }else if(kind==="mrbeast"){
+    const pal=(st.palette&&st.palette.length)?st.palette.map(assColor):[hi,rest];
+    toks.forEach((_,i)=>span(i,pal[i%pal.length]));
+  }else if(kind==="highlighter"){
+    toks.forEach((_,i)=>span(i,rest,i===ai?"marker":null));
+  }else if(kind==="wordbox"){
+    toks.forEach((_,i)=>span(i,i===ai?null:rest,i===ai?"box":null));
+  }else if(kind==="bounce"){
+    for(let i=0;i<=ai;i++)span(i,rest); cap.classList.add("pop");
+  }else if(kind==="typewriter"){
+    for(let i=0;i<=ai;i++)span(i,rest);
+  }else if(kind==="phrase"){
+    const g=_phraseGroups(toks); const grp=g.find(x=>x.i0<=ai&&ai<=x.i1)||g[0];
+    for(let i=grp.i0;i<=grp.i1;i++)span(i,rest);
+  }else if(kind==="hormozi"){
+    const start=ai-(ai%2);
+    for(let i=start;i<Math.min(start+2,toks.length);i++)span(i,i<=active?hi:rest);
+    cap.classList.add("pop");
+  }else if(kind==="pop"){
+    span(ai,hi||rest); cap.classList.add("pop");
+  }else{
+    toks.forEach((_,i)=>span(i,i<=active?hi:rest));
+  }
   o.append(cap);
 }
 
@@ -234,8 +367,11 @@ function renderCaption(){
 $("burn").onclick=async()=>{
   $("burn").disabled=true;showLoader("Burning captions…");status("");
   try{
+    const styleOv={};
+    if($("gfont").value)styleOv.font_name=$("gfont").value;
+    const gs=parseInt($("gsize").value);if(gs)styleOv.font_size=gs;
     const r=await fetch("/export",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({job,segments,preset:$("style").value,want_srt:$("srt").checked})});
+      body:JSON.stringify({job,segments,preset:$("style").value,style:styleOv,want_srt:$("srt").checked})});
     if(!r.ok)throw new Error((await r.json()).detail||r.statusText);
     const d=await r.json(),bust="?t="+Date.now();
     $("player").src=d.download+bust;$("dl").href=d.download;

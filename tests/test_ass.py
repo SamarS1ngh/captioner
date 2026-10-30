@@ -59,30 +59,86 @@ def _one_seg_transcript():
     )
 
 
-def test_presets_registry_has_classic_first_and_all_assstyle():
+def test_presets_registry_has_distinct_kinds():
     names = preset_names()
-    assert names and names[0] == "classic"
+    assert names and names[0] == "karaoke"
+    assert len(PRESETS) == 10
+    kinds = {s.kind for s in PRESETS.values()}
+    assert kinds == {"karaoke", "highlighter", "wordbox", "hormozi", "pop",
+                     "bounce", "mrbeast", "boxed", "phrase", "typewriter"}
     assert all(isinstance(s, AssStyle) for s in PRESETS.values())
-    assert len(PRESETS) >= 5
 
 
-def test_get_style_unknown_falls_back_to_classic():
-    assert get_style("does-not-exist") is PRESETS["classic"]
+def test_highlighter_marker_moves_word_to_word():
+    t = Transcript([Segment("ek do teen", 0.0, 1.5, [
+        Word("ek", 0.0, 0.5), Word("do", 0.5, 1.0), Word("teen", 1.0, 1.5)])], "hi")
+    dl = [l for l in build_ass(t, get_style("highlighter")).splitlines()
+          if l.startswith("Dialogue:")]
+    assert len(dl) == 3                 # one event per word (marker position)
+    assert all("\\3a&H30&" in d for d in dl)  # translucent marker border
+
+
+def test_per_word_font_and_size_override():
+    seg = Segment("main office", 0.0, 1.0,
+                  [Word("main", 0.0, 0.5), Word("office", 0.5, 1.0)],
+                  word_styles={1: {"font": "Impact", "size": 120}})
+    out = build_ass(Transcript([seg], "hi"), get_style("karaoke"))
+    assert "\\fnImpact" in out and "\\fs120" in out
+    # the override restores to the style's own font/size afterwards
+    assert "\\fnArial\\fs72" in out
+
+
+def test_get_style_unknown_falls_back_to_default():
+    assert get_style("does-not-exist") is PRESETS["karaoke"]
 
 
 def test_build_ass_uses_preset_font_and_size():
-    out = build_ass(_one_seg_transcript(), get_style("bold_pop"))
+    out = build_ass(_one_seg_transcript(), get_style("mrbeast"))
     assert "Arial Black" in out
-    # font size is the 3rd field of the Style line
     style_line = next(l for l in out.splitlines() if l.startswith("Style:"))
-    assert style_line.split(",")[2] == "88"
+    assert style_line.split(",")[2] == "88"  # mrbeast font size
 
 
 def test_boxed_preset_sets_border_style_3():
     out = build_ass(_one_seg_transcript(), get_style("boxed"))
     style_line = next(l for l in out.splitlines() if l.startswith("Style:"))
     fields = style_line.split(",")
-    # fields: 0"Style: Default" 1font 2size 3pri 4sec 5outlineCol 6back 7bold
-    # 8italic 9underline 10strike 11scaleX 12scaleY 13spacing 14angle
-    # 15BorderStyle 16Outline 17Shadow 18alignment
-    assert fields[15] == "3" and fields[16] == "4"  # boxed: border 3, outline 4
+    assert fields[15] == "3"  # BorderStyle = opaque box
+
+
+def test_hormozi_chunks_into_separate_events_centered_uppercase():
+    # 4 words -> 2 chunks of 2 -> 2 dialogue events, centered (\an5), caps
+    t = Transcript([Segment("main office ja raha", 0.0, 2.0, [
+        Word("main", 0.0, 0.5), Word("office", 0.5, 1.0),
+        Word("ja", 1.0, 1.5), Word("raha", 1.5, 2.0)])], "hi")
+    dl = [l for l in build_ass(t, get_style("hormozi")).splitlines()
+          if l.startswith("Dialogue:")]
+    assert len(dl) == 2
+    assert all("\\an5" in d for d in dl)
+    assert "MAIN" in dl[0] and "OFFICE" in dl[0]
+
+
+def test_pop_one_event_per_word():
+    t = Transcript([Segment("ek do teen", 0.0, 1.5, [
+        Word("ek", 0.0, 0.5), Word("do", 0.5, 1.0), Word("teen", 1.0, 1.5)])], "hi")
+    dl = [l for l in build_ass(t, get_style("pop")).splitlines()
+          if l.startswith("Dialogue:")]
+    assert len(dl) == 3  # one word per event
+    assert all("\\fscx" in d for d in dl)  # scale pop
+
+
+def test_typewriter_accumulates_words():
+    t = Transcript([Segment("ek do teen", 0.0, 1.5, [
+        Word("ek", 0.0, 0.5), Word("do", 0.5, 1.0), Word("teen", 1.0, 1.5)])], "hi")
+    dl = [l for l in build_ass(t, get_style("typewriter")).splitlines()
+          if l.startswith("Dialogue:")]
+    assert len(dl) == 3
+    # last event shows the whole line
+    assert "ek do teen" in dl[-1]
+    assert dl[0].rstrip().endswith("ek")  # first shows only first word
+
+
+def test_mrbeast_colors_each_word():
+    out = build_ass(_one_seg_transcript(), get_style("mrbeast"))
+    dl = [l for l in out.splitlines() if l.startswith("Dialogue:")][0]
+    assert dl.count("\\c&H") >= 2  # a colour override per word

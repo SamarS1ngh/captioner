@@ -5,7 +5,7 @@ carries the original per-word time spans.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,8 @@ class Segment:
     start: float
     end: float
     words: list[Word]
+    # per-word overrides keyed by token index: {i: {"font": str, "size": int}}
+    word_styles: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -35,15 +37,20 @@ class Segment:
             "start": self.start,
             "end": self.end,
             "words": [w.to_dict() for w in self.words],
+            "word_styles": self.word_styles,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> Segment:
+        raw = data.get("word_styles") or {}
+        # JSON object keys arrive as strings; token indices are ints
+        word_styles = {int(k): v for k, v in raw.items()}
         return cls(
             text=data["text"],
             start=data["start"],
             end=data["end"],
             words=[Word.from_dict(w) for w in data["words"]],
+            word_styles=word_styles,
         )
 
 
