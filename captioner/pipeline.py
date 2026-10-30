@@ -17,7 +17,8 @@ class MissingKeyError(ValueError):
     """Raised when no Groq API key is available."""
 
 
-def process_video(video_path: str, api_key: str | None = None) -> Transcript:
+def process_video(video_path: str, api_key: str | None = None,
+                  language: str = "hi", romanize: bool = True) -> Transcript:
     key = (api_key or groq_engine.key_from_env() or "").strip()
     if not key:
         raise MissingKeyError(
@@ -28,6 +29,8 @@ def process_video(video_path: str, api_key: str | None = None) -> Transcript:
     os.close(fd)
     try:
         extract_audio(video_path, audio_path)
-        return groq_engine.transcribe_and_romanize(audio_path, key)
+        return groq_engine.transcribe_and_romanize(
+            audio_path, key, language=language, romanize=romanize
+        )
     finally:
         os.remove(audio_path)

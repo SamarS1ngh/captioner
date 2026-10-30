@@ -31,34 +31,87 @@ _CHUNK_SLOP = 15          # don't chunk something only a little over the limit
 # urllib's default UA is 403'd by Groq's edge; requests' UA is fine, but be explicit.
 _HEADERS_UA = {"User-Agent": "captioner/1.0"}
 
-CLEANUP_SYSTEM = (
-    "You convert auto-transcribed Hindi subtitles into natural ROMANIZED HINGLISH, "
-    "the way Indian creators type on Instagram/YouTube. Rules: Hindi words -> casual "
-    "Roman Latin (hai, nahi, matlab, kyunki, karna). English words -> correct English "
-    "spelling (the transcript may spell English phonetically in Devanagari - fix them: "
-    "विटनेस्ट -> witnessed, आईफोन -> iPhone). Keep the meaning and word order. Never "
-    "translate Hindi into English. If a line is already correct English, leave it "
-    "unchanged. Output ONLY the cleaned line - no quotes, no notes, no explanation."
-)
+# Groq whisper-large-v3 language codes we surface in the UI (code -> display name).
+# "" / None = auto-detect. Any ISO code whisper supports also works if passed through.
+LANGUAGES: dict[str, str] = {
+    "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "kn": "Kannada", "ml": "Malayalam",
+    "mr": "Marathi", "bn": "Bengali", "gu": "Gujarati", "pa": "Punjabi", "ur": "Urdu",
+    "en": "English", "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese",
+    "it": "Italian", "nl": "Dutch", "ru": "Russian", "ar": "Arabic", "tr": "Turkish",
+    "id": "Indonesian", "ja": "Japanese", "ko": "Korean", "zh": "Chinese",
+}
+
+
+# The language menu shown in the UI. Each entry picks a whisper language code and
+# whether to romanize the output to Latin ("-glish") or keep the native script.
+LANG_MENU: list[dict] = [
+    {"id": "hinglish", "label": "Hinglish", "code": "hi", "romanize": True},
+    {"id": "hindi", "label": "Hindi", "code": "hi", "romanize": False},
+    {"id": "english", "label": "English", "code": "en", "romanize": False},
+    {"id": "tanglish", "label": "Tanglish (Tamil)", "code": "ta", "romanize": True},
+    {"id": "tamil", "label": "Tamil", "code": "ta", "romanize": False},
+    {"id": "tenglish", "label": "Tenglish (Telugu)", "code": "te", "romanize": True},
+    {"id": "telugu", "label": "Telugu", "code": "te", "romanize": False},
+    {"id": "banglish", "label": "Banglish (Bengali)", "code": "bn", "romanize": True},
+    {"id": "bengali", "label": "Bengali", "code": "bn", "romanize": False},
+    {"id": "punglish", "label": "Punjabi (Latin)", "code": "pa", "romanize": True},
+    {"id": "punjabi", "label": "Punjabi", "code": "pa", "romanize": False},
+    {"id": "marathi", "label": "Marathi", "code": "mr", "romanize": False},
+    {"id": "gujarati", "label": "Gujarati", "code": "gu", "romanize": False},
+    {"id": "kannada", "label": "Kannada", "code": "kn", "romanize": False},
+    {"id": "malayalam", "label": "Malayalam", "code": "ml", "romanize": False},
+    {"id": "urdu", "label": "Urdu", "code": "ur", "romanize": False},
+    {"id": "spanish", "label": "Spanish", "code": "es", "romanize": False},
+    {"id": "french", "label": "French", "code": "fr", "romanize": False},
+    {"id": "german", "label": "German", "code": "de", "romanize": False},
+    {"id": "portuguese", "label": "Portuguese", "code": "pt", "romanize": False},
+    {"id": "italian", "label": "Italian", "code": "it", "romanize": False},
+    {"id": "russian", "label": "Russian", "code": "ru", "romanize": False},
+    {"id": "arabic", "label": "Arabic", "code": "ar", "romanize": False},
+    {"id": "japanese", "label": "Japanese", "code": "ja", "romanize": False},
+    {"id": "korean", "label": "Korean", "code": "ko", "romanize": False},
+    {"id": "chinese", "label": "Chinese", "code": "zh", "romanize": False},
+    {"id": "auto", "label": "Auto-detect", "code": "", "romanize": False},
+]
+
+
+def _cleanup_system(language: str) -> str:
+    """System prompt that romanizes a given language into natural Latin script,
+    keeping code-switched English correct (the Hinglish approach, generalized)."""
+    name = LANGUAGES.get(language or "", "the source language")
+    return (
+        f"You convert auto-transcribed {name} subtitles into natural ROMANIZED text, "
+        "the way creators type on Instagram/YouTube. Rules: native-language words -> "
+        "casual Latin letters, written phonetically and naturally. English (or other "
+        "already-Latin) words -> correct English spelling (the transcript may spell them "
+        "phonetically in the native script - fix those). Keep the meaning and word order. "
+        "Never translate into English. If a line is already correct English, leave it "
+        "unchanged. Output ONLY the cleaned line - no quotes, no notes, no explanation."
+    )
 
 
 class GroqError(RuntimeError):
     pass
 
 
-def _transcribe(audio_path: str, api_key: str) -> dict:
-    """Groq whisper-large-v3 -> verbose_json with word + segment timestamps."""
+def _transcribe(audio_path: str, api_key: str, language: str = "hi") -> dict:
+    """Groq whisper-large-v3 -> verbose_json with word + segment timestamps.
+
+    `language` is an ISO code; falsy means let whisper auto-detect.
+    """
+    data = {
+        "model": ASR_MODEL,
+        "response_format": "verbose_json",
+        "temperature": "0",
+        "timestamp_granularities[]": ["word", "segment"],
+    }
+    if language:
+        data["language"] = language
     with open(audio_path, "rb") as f:
         resp = requests.post(
             f"{API_ROOT}/audio/transcriptions",
             headers={"Authorization": f"Bearer {api_key}", **_HEADERS_UA},
-            data={
-                "model": ASR_MODEL,
-                "language": "hi",
-                "response_format": "verbose_json",
-                "temperature": "0",
-                "timestamp_granularities[]": ["word", "segment"],
-            },
+            data=data,
             files={"file": ("audio.flac", f, "audio/flac")},
             timeout=300,
         )
@@ -104,21 +157,21 @@ def _offset(items: list, offset: float, out: list) -> None:
         out.append(it)
 
 
-def _collect(audio_path: str, key: str):
+def _collect(audio_path: str, key: str, language: str = "hi"):
     """Transcribe, chunking long audio. Returns (words, segments, language)."""
     dur = _probe_duration(audio_path)
     if dur <= CHUNK_SECS + _CHUNK_SLOP:
-        d = _transcribe(audio_path, key)
-        return d.get("words") or [], d.get("segments") or [], d.get("language", "hi")
+        d = _transcribe(audio_path, key, language)
+        return d.get("words") or [], d.get("segments") or [], d.get("language") or language or "hi"
     tmpdir, parts = _split(audio_path, CHUNK_SECS)
     try:
         if not parts:  # split produced nothing -> try the whole file once
-            d = _transcribe(audio_path, key)
-            return d.get("words") or [], d.get("segments") or [], d.get("language", "hi")
-        words_all, segs_all, lang = [], [], "hi"
+            d = _transcribe(audio_path, key, language)
+            return d.get("words") or [], d.get("segments") or [], d.get("language") or language or "hi"
+        words_all, segs_all, lang = [], [], (language or "hi")
         for offset, cpath in parts:
-            d = _transcribe(cpath, key)
-            lang = d.get("language", lang)
+            d = _transcribe(cpath, key, language)
+            lang = d.get("language") or lang
             _offset(d.get("words") or [], offset, words_all)
             _offset(d.get("segments") or [], offset, segs_all)
         return words_all, segs_all, lang
@@ -126,7 +179,7 @@ def _collect(audio_path: str, key: str):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def _cleanup(text: str, api_key: str, model: str = CLEANUP_MODEL) -> str:
+def _cleanup(text: str, api_key: str, system: str, model: str = CLEANUP_MODEL) -> str:
     resp = requests.post(
         f"{API_ROOT}/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", **_HEADERS_UA},
@@ -134,7 +187,7 @@ def _cleanup(text: str, api_key: str, model: str = CLEANUP_MODEL) -> str:
             "model": model,
             "temperature": 0.1,
             "messages": [
-                {"role": "system", "content": CLEANUP_SYSTEM},
+                {"role": "system", "content": system},
                 {"role": "user", "content": text},
             ],
         },
@@ -158,27 +211,32 @@ def _bucket_words(words: list[dict], start: float, end: float) -> list[Word]:
     return out
 
 
-def transcribe_and_romanize(audio_path: str, api_key: str) -> Transcript:
-    """Full Groq path: audio -> cleaned, word-timestamped Hinglish Transcript.
+def transcribe_and_romanize(audio_path: str, api_key: str,
+                            language: str = "hi", romanize: bool = True) -> Transcript:
+    """Full Groq path: audio -> cleaned, word-timestamped Transcript.
 
-    Segment.text is the romanized Hinglish (from the LLM); Segment.words keep the
-    original word timestamps so karaoke timing (distribute_timing) still works
-    after the text is reworded.
+    `language` is an ISO code (falsy = auto-detect). When `romanize` is True the
+    transcript is cleaned into natural Latin script (the Hinglish approach, for any
+    language); when False the native-script whisper text is kept verbatim.
+
+    Segment.text is the (cleaned) line; Segment.words keep the original word
+    timestamps so karaoke timing (distribute_timing) still works after rewording.
     """
     key = (api_key or "").strip()
     if not key:
         raise GroqError("no API key")
-    words, raw_segments, language = _collect(audio_path, key)
+    words, raw_segments, detected = _collect(audio_path, key, language)
+    system = _cleanup_system(language or detected) if romanize else ""
     segments: list[Segment] = []
     for s in raw_segments:
         raw_text = (s.get("text") or "").strip()
         if not raw_text:
             continue
         start, end = float(s["start"]), float(s["end"])
-        cleaned = _cleanup(raw_text, key) or raw_text
+        cleaned = (_cleanup(raw_text, key, system) or raw_text) if romanize else raw_text
         seg_words = _bucket_words(words, start, end)
         segments.append(Segment(text=cleaned, start=start, end=end, words=seg_words))
-    return Transcript(segments=segments, language=language)
+    return Transcript(segments=segments, language=detected)
 
 
 def key_from_env() -> str:

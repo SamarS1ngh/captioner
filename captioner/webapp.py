@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from captioner.ass import AssStyle, build_ass, get_style, preset_names
 from captioner.export import burn_captions
+from captioner.groq_engine import LANG_MENU
 from captioner.models import Transcript
 from captioner.pipeline import process_video
 from captioner.srt import build_srt
@@ -47,17 +48,26 @@ def index() -> FileResponse:
 @app.get("/styles")
 def styles() -> dict:
     # full field set per preset so the browser preview can render it faithfully
-    return {"presets": [
-        {"name": name, **dataclasses.asdict(get_style(name))}
-        for name in preset_names()
-    ]}
+    return {
+        "presets": [
+            {"name": name, **dataclasses.asdict(get_style(name))}
+            for name in preset_names()
+        ],
+        "languages": LANG_MENU,
+    }
 
 
 @app.post("/process")
 async def process(
     video: UploadFile = File(...),
     api_key: str = Form(""),
+    language: str = Form("hi"),
+    romanize: str = Form("true"),
 ) -> dict:
+    lang = (language or "").strip()
+    if lang in ("", "auto"):
+        lang = None
+    rom = str(romanize).strip().lower() not in ("false", "0", "no", "off", "")
     job = uuid.uuid4().hex
     work = WORK_ROOT / job
     work.mkdir(parents=True, exist_ok=True)
@@ -66,7 +76,9 @@ async def process(
     with path.open("wb") as f:
         shutil.copyfileobj(video.file, f)
     try:
-        transcript = await run_in_threadpool(process_video, str(path), api_key)
+        transcript = await run_in_threadpool(
+            process_video, str(path), api_key, lang, rom
+        )
     except Exception as exc:
         shutil.rmtree(work, ignore_errors=True)
         raise HTTPException(500, f"Processing failed: {exc}")

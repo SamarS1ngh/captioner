@@ -83,10 +83,34 @@ def test_long_audio_is_chunked_with_offsets(monkeypatch, tmp_path):
     monkeypatch.setattr(groq_engine.shutil, "rmtree", lambda *a, **k: None)
     seen = []
     monkeypatch.setattr(groq_engine, "_transcribe",
-                        lambda path, key: seen.append(path) or chunk_payload)
-    monkeypatch.setattr(groq_engine, "_cleanup", lambda text, key: "cleaned")
+                        lambda path, key, language="hi": seen.append(path) or chunk_payload)
+    monkeypatch.setattr(groq_engine, "_cleanup", lambda text, key, system="": "cleaned")
     t = groq_engine.transcribe_and_romanize(str(tmp_path / "a.flac"), "gsk_test")
     assert seen == ["c0", "c1"]                       # both chunks transcribed
     assert len(t.segments) == 2
     assert t.segments[1].start == groq_engine.CHUNK_SECS        # 2nd chunk offset applied
     assert t.segments[1].words[0].start == groq_engine.CHUNK_SECS
+
+
+def test_no_romanize_keeps_native_text(monkeypatch, tmp_path):
+    payload = {"language": "es",
+               "segments": [{"text": "hola mundo", "start": 0.0, "end": 1.0}],
+               "words": [{"word": "hola", "start": 0.0, "end": 0.5},
+                         {"word": "mundo", "start": 0.5, "end": 1.0}]}
+    monkeypatch.setattr(groq_engine, "_transcribe", lambda p, k, language="hi": payload)
+    monkeypatch.setattr(groq_engine, "_cleanup",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no cleanup")))
+    t = groq_engine.transcribe_and_romanize(str(tmp_path / "a.flac"), "gsk",
+                                            language="es", romanize=False)
+    assert t.segments[0].text == "hola mundo"   # native script kept, LLM skipped
+    assert t.language == "es"
+
+
+def test_language_passed_to_transcribe(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(groq_engine, "_transcribe",
+                        lambda p, k, language="hi": seen.update(lang=language) or
+                        {"language": "ta", "segments": [], "words": []})
+    groq_engine.transcribe_and_romanize(str(tmp_path / "a.flac"), "gsk",
+                                        language="ta", romanize=False)
+    assert seen["lang"] == "ta"
