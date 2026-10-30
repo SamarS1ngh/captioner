@@ -24,15 +24,20 @@ select{padding:.4rem;font-size:1rem}
 #pvwrap{position:relative;display:inline-block;max-width:100%;margin:.5rem 0;background:#000;border-radius:8px;overflow:hidden}
 /* the caption box: drag to move, side handles resize width, corner resizes text */
 #capbox{position:absolute;box-sizing:border-box;z-index:5;touch-action:none;
-  border:1.5px dashed rgba(255,255,255,.4);border-radius:6px;cursor:move}
+  border:1px dashed transparent;border-radius:6px;cursor:move;transition:border-color .15s}
+#capbox:hover,#capbox.rzon{border-color:rgba(255,255,255,.55)}
 #capbox.hidden{display:none!important}
 #overlay{pointer-events:none;line-height:1.15;text-align:center;padding:.1em .15em}
 #overlay .cap{display:inline-block;max-width:100%}
 #overlay span{white-space:pre-wrap}
-.rz{position:absolute;background:#2563EB;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);z-index:6}
-.rz.l,.rz.r{top:50%;width:9px;height:34px;margin-top:-17px;border-radius:4px;cursor:ew-resize}
-.rz.l{left:2px}.rz.r{right:2px}
-.rz.se{right:2px;bottom:2px;width:15px;height:15px;border-radius:50%;cursor:nwse-resize}
+/* resize grips: hidden until you hover the box (always shown on touch) */
+.rz{position:absolute;opacity:0;transition:opacity .15s;z-index:6;
+  background:rgba(255,255,255,.92);box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+#capbox:hover .rz,#capbox.rzon .rz{opacity:1}
+.rz.l,.rz.r{top:50%;width:4px;height:26px;margin-top:-13px;border-radius:2px;cursor:ew-resize}
+.rz.l{left:3px}.rz.r{right:3px}
+.rz.se{right:3px;bottom:3px;width:9px;height:9px;border-radius:2px;cursor:nwse-resize}
+@media(hover:none){.rz{opacity:.85}#capbox{border-color:rgba(255,255,255,.4)}}
 @media(prefers-reduced-motion:reduce){#overlay .pop{animation:none}}
 @keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
 #overlay .pop{animation:pop .22s ease-out}
@@ -196,8 +201,10 @@ function startDrag(mode,e){
   const r=pv.getBoundingClientRect(), cxN=(gpos.x!=null?gpos.x:0.5);
   drag={mode, y:ptY(e), size:effSize(STYLES[$("style").value]||{}),
         cx:r.left+cxN*r.width, pw:r.width||1, ph:r.height||1, top:r.top, left:r.left};
+  $("capbox").classList.add("rzon");
   e.preventDefault(); e.stopPropagation();
 }
+function endDrag(){drag=null;$("capbox").classList.remove("rzon");}
 function onDragMove(e){
   if(!drag)return;
   if(drag.mode==="move"){
@@ -213,9 +220,9 @@ function onDragMove(e){
   }
 }
 document.addEventListener("mousemove",onDragMove);
-document.addEventListener("mouseup",()=>{drag=null;});
+document.addEventListener("mouseup",endDrag);
 document.addEventListener("touchmove",e=>{if(drag){onDragMove(e);e.preventDefault();}},{passive:false});
-document.addEventListener("touchend",()=>{drag=null;});
+document.addEventListener("touchend",endDrag);
 (function wireBox(){
   const cb=$("capbox");
   const onBody=e=>{if(e.target===cb||e.target.closest("#overlay"))startDrag("move",e);};
